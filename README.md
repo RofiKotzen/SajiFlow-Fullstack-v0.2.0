@@ -1,101 +1,93 @@
-# Saji Flow Full-stack v0.2.0
+# Saji Flow Full-stack v0.3.0
 
-Paket ini menyatukan frontend Kotzen Operation/Saji Flow dengan backend PostgreSQL yang sudah dibuat.
+Versi ini menambahkan **Budget Planning Phase 1** yang terhubung penuh ke PostgreSQL dan mempertahankan seluruh fondasi autentikasi, tenant, outlet, user, role, permission, serta fitur reset password dari versi sebelumnya.
 
-## Yang sudah terhubung ke database
+## Fitur Budget Planning
 
-- Login dan logout.
-- Access token serta refresh-token rotation.
-- Profil tenant.
-- Daftar, tambah, aktifkan, dan nonaktifkan outlet.
-- Daftar, tambah, aktifkan, suspend, dan assignment role user.
-- Daftar dan tambah role.
-- Assignment permission ke role.
-- Katalog permission.
-- Pemilihan outlet aktif pada header.
+- Daftar rencana anggaran per tenant dan outlet.
+- Membuat serta mengubah draft anggaran bulanan.
+- Alokasi multi-baris dengan kategori pembelian, operasional, pemeliharaan, pemasaran, dan lainnya.
+- Total anggaran dihitung otomatis oleh server dari seluruh alokasi.
+- Workflow `draft → submitted → approved/rejected → closed`.
+- Alasan wajib ketika anggaran ditolak.
+- Permission terpisah untuk melihat, membuat, mengubah, mengajukan, menyetujui, menolak, dan menutup.
+- Riwayat status dan audit trail.
+- Pencegahan baseline approved ganda pada outlet, nama, dan periode yang beririsan.
+- Tenant isolation dan pembatasan outlet pada seluruh operasi.
 
-Menu POS, KDS, inventory, purchasing, budget, supplier, dan resep tetap mempertahankan mock data untuk sementara. Endpoint modul tersebut akan disambungkan pada fase berikutnya.
+`actual_amount` hanya dapat diperbarui oleh sistem. Pada Phase 1 nilainya masih nol dan akan mulai terisi ketika integrasi Purchase Order/Realisasi dikerjakan.
 
-## Persyaratan
+## Update dari v0.2.0
 
-- PostgreSQL 16+ aktif pada port `5432`.
-- Database `sajiflow` sudah tersedia.
-- Node.js 22+.
+1. Hentikan terminal backend dan frontend.
+2. Commit atau backup folder project lama.
+3. Salin folder `backend` dan `frontend` dari paket ini ke project lama, lalu pilih **Replace/Overwrite**.
+4. Jangan hapus file konfigurasi lokal berikut:
 
-## Cara paling mudah di Windows
+   ```text
+   backend\.env
+   frontend\.env.local
+   ```
 
-Jalankan file berikut secara berurutan dari PowerShell:
+   Kedua file tersebut sengaja tidak disertakan dalam ZIP agar password dan secret Rofi tidak tertimpa.
+
+5. Jalankan pada terminal backend:
+
+   ```powershell
+   cd backend
+   npm.cmd install
+   npm.cmd run db:migrate
+   npm.cmd run db:seed
+   npm.cmd run build
+   npm.cmd run start:dev
+   ```
+
+   `db:seed` wajib dijalankan ulang agar permission Budget Planning ditambahkan ke role Super Administrator. Proses seed aman dijalankan berulang dan tidak mengganti password admin yang sudah ada.
+
+6. Buka terminal baru untuk frontend:
+
+   ```powershell
+   cd frontend
+   npm.cmd install
+   npm.cmd run dev
+   ```
+
+7. Logout lalu login kembali agar access token memuat permission baru.
+8. Buka menu **Budget Planning**.
+
+## Instalasi baru
+
+Di PowerShell, jalankan secara berurutan:
 
 ```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\1-setup.ps1
 ```
 
-Setelah dependency selesai, buka `backend\.env` lalu isi:
-
-- Password PostgreSQL pada `DATABASE_URL`.
-- `JWT_ACCESS_SECRET` minimal 32 karakter.
-- `JWT_REFRESH_SECRET` minimal 32 karakter dan berbeda.
-- `SEED_ADMIN_PASSWORD` untuk password login awal.
-
-Kemudian jalankan:
+Isi `backend\.env`, kemudian lanjutkan:
 
 ```powershell
 .\2-init-database.ps1
 .\3-start.ps1
 ```
 
-File `3-start.ps1` membuka dua terminal:
+Alamat lokal:
 
-- Backend: `http://localhost:3000`
-- Frontend: `http://localhost:5173`
+- Frontend: <http://localhost:5173>
+- Backend: <http://localhost:3000>
+- Swagger: <http://localhost:3000/docs>
+- Health: <http://localhost:3000/api/v1/health>
 
-Buka frontend pada <http://localhost:5173>.
+## Verifikasi cepat
 
-## Login pertama
+- Buat rencana anggaran dan minimal satu alokasi bernilai lebih dari nol.
+- Simpan draft, lalu ajukan persetujuan.
+- Dengan Super Administrator, setujui atau tolak anggaran.
+- Jika ditolak, ubah dan simpan; status otomatis kembali menjadi draft.
+- Anggaran approved tidak dapat diedit dan dapat ditutup.
 
-Gunakan nilai dari `backend\.env`:
+## Catatan keamanan
 
-```text
-Tenant : SEED_TENANT_CODE
-Email  : SEED_ADMIN_EMAIL
-Password: SEED_ADMIN_PASSWORD
-```
-
-Nilai default tenant dan email adalah:
-
-```text
-SAJIFLOW
-admin@sajiflow.local
-```
-
-## Menjalankan manual
-
-Terminal pertama:
-
-```powershell
-cd backend
-npm.cmd install
-npm.cmd run db:migrate
-npm.cmd run db:seed
-npm.cmd run start:dev
-```
-
-Terminal kedua:
-
-```powershell
-cd frontend
-npm.cmd install
-npm.cmd run dev
-```
-
-## Dokumentasi API
-
-Setelah backend aktif, buka <http://localhost:3000/docs>.
-
-## Catatan
-
-- Jangan mengirim atau mengunggah file `backend\.env`.
-- Jangan menghapus migration `0001` dan `0002`.
-- Migration runner otomatis mengenali schema v1.1 yang sudah pernah dijalankan.
-- Perubahan role dan permission aktif setelah user login ulang atau melakukan refresh token.
-- Untuk fase lokal/MVP, token disimpan pada penyimpanan browser. Sebelum production publik, refresh token akan dipindahkan ke cookie HttpOnly dan backend ditempatkan di HTTPS.
+- Jangan commit `backend\.env` atau `frontend\.env.local`.
+- Jangan mengubah realisasi langsung melalui SQL; nilai tersebut akan berasal dari transaksi sistem.
+- Sebelum production, pisahkan permission maker dan approver ke role yang berbeda sesuai kebijakan tenant.

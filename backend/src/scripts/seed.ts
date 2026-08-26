@@ -35,6 +35,13 @@ const permissionSeed = [
   ["roles.update", "roles", "Mengubah role"],
   ["roles.assign_permissions", "roles", "Menetapkan permission role"],
   ["permissions.read", "permissions", "Melihat katalog permission"],
+  ["budgets.read", "budgets", "Melihat rencana dan realisasi anggaran"],
+  ["budgets.create", "budgets", "Membuat rencana anggaran"],
+  ["budgets.update", "budgets", "Mengubah anggaran draft atau rejected"],
+  ["budgets.submit", "budgets", "Mengajukan anggaran untuk persetujuan"],
+  ["budgets.approve", "budgets", "Menyetujui anggaran"],
+  ["budgets.reject", "budgets", "Menolak anggaran dengan alasan"],
+  ["budgets.close", "budgets", "Menutup periode anggaran approved"],
 ] as const;
 
 async function main(): Promise<void> {

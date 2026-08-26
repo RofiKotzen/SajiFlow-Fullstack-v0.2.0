@@ -1,6 +1,6 @@
-# Saji Flow Backend v0.1.0
+# Saji Flow Backend v0.3.0
 
-Fondasi backend Saji Flow untuk PostgreSQL: koneksi database, autentikasi JWT, tenant, outlet, user, role, dan permission.
+Fondasi backend Saji Flow untuk PostgreSQL: koneksi database, autentikasi JWT, tenant, outlet, user, role, permission, dan Budget Planning.
 
 ## Cakupan
 
@@ -16,6 +16,7 @@ Fondasi backend Saji Flow untuk PostgreSQL: koneksi database, autentikasi JWT, t
 - Swagger/OpenAPI di `/docs`.
 - Migration runner yang mengenali schema v1.1 yang sudah pernah dijalankan.
 - Seed tenant, outlet, permission, role Super Admin, dan admin pertama.
+- Budget Planning multi-outlet dengan alokasi, realisasi, approval workflow, audit, dan histori status.
 
 ## Persyaratan
 
@@ -107,24 +108,30 @@ Bearer ACCESS_TOKEN
 
 ## Endpoint inti
 
-| Method | Endpoint | Permission | Fungsi |
-|---|---|---|---|
-| POST | `/api/v1/auth/login` | Public | Login |
-| POST | `/api/v1/auth/refresh` | Public | Rotasi refresh token |
-| POST | `/api/v1/auth/logout` | Public | Cabut refresh token |
-| GET | `/api/v1/auth/me` | Login | Profil dan hak akses aktif |
-| GET | `/api/v1/tenant` | `tenant.read` | Profil tenant aktif |
-| PATCH | `/api/v1/tenant` | `tenant.update` | Ubah tenant |
-| GET/POST | `/api/v1/outlets` | `outlets.read/create` | Daftar/buat outlet |
-| GET/PATCH | `/api/v1/outlets/:id` | `outlets.read/update` | Detail/ubah outlet |
-| GET/POST | `/api/v1/users` | `users.read/create` | Daftar/buat user |
-| GET/PATCH | `/api/v1/users/:id` | `users.read/update` | Detail/ubah user |
-| PUT | `/api/v1/users/:id/roles` | `users.assign_roles` | Ganti assignment role user |
-| PUT | `/api/v1/users/:id/password` | `users.reset_password` | Reset password dan cabut seluruh refresh token user |
-| GET/POST | `/api/v1/roles` | `roles.read/create` | Daftar/buat role |
-| GET/PATCH | `/api/v1/roles/:id` | `roles.read/update` | Detail/ubah role |
-| PUT | `/api/v1/roles/:id/permissions` | `roles.assign_permissions` | Ganti permission role |
-| GET | `/api/v1/permissions` | `permissions.read` | Katalog permission |
+| Method    | Endpoint                        | Permission                 | Fungsi                                              |
+| --------- | ------------------------------- | -------------------------- | --------------------------------------------------- |
+| POST      | `/api/v1/auth/login`            | Public                     | Login                                               |
+| POST      | `/api/v1/auth/refresh`          | Public                     | Rotasi refresh token                                |
+| POST      | `/api/v1/auth/logout`           | Public                     | Cabut refresh token                                 |
+| GET       | `/api/v1/auth/me`               | Login                      | Profil dan hak akses aktif                          |
+| GET       | `/api/v1/tenant`                | `tenant.read`              | Profil tenant aktif                                 |
+| PATCH     | `/api/v1/tenant`                | `tenant.update`            | Ubah tenant                                         |
+| GET/POST  | `/api/v1/outlets`               | `outlets.read/create`      | Daftar/buat outlet                                  |
+| GET/PATCH | `/api/v1/outlets/:id`           | `outlets.read/update`      | Detail/ubah outlet                                  |
+| GET/POST  | `/api/v1/users`                 | `users.read/create`        | Daftar/buat user                                    |
+| GET/PATCH | `/api/v1/users/:id`             | `users.read/update`        | Detail/ubah user                                    |
+| PUT       | `/api/v1/users/:id/roles`       | `users.assign_roles`       | Ganti assignment role user                          |
+| PUT       | `/api/v1/users/:id/password`    | `users.reset_password`     | Reset password dan cabut seluruh refresh token user |
+| GET/POST  | `/api/v1/roles`                 | `roles.read/create`        | Daftar/buat role                                    |
+| GET/PATCH | `/api/v1/roles/:id`             | `roles.read/update`        | Detail/ubah role                                    |
+| PUT       | `/api/v1/roles/:id/permissions` | `roles.assign_permissions` | Ganti permission role                               |
+| GET       | `/api/v1/permissions`           | `permissions.read`         | Katalog permission                                  |
+| GET/POST  | `/api/v1/budgets`               | `budgets.read/create`      | Daftar/buat rencana anggaran                        |
+| GET/PATCH | `/api/v1/budgets/:id`           | `budgets.read/update`      | Detail/ubah draft anggaran                          |
+| POST      | `/api/v1/budgets/:id/submit`    | `budgets.submit`           | Ajukan anggaran                                     |
+| POST      | `/api/v1/budgets/:id/approve`   | `budgets.approve`          | Setujui anggaran                                    |
+| POST      | `/api/v1/budgets/:id/reject`    | `budgets.reject`           | Tolak anggaran dengan alasan                        |
+| POST      | `/api/v1/budgets/:id/close`     | `budgets.close`            | Tutup periode anggaran                              |
 
 ## Aturan penting
 
@@ -135,6 +142,10 @@ Bearer ACCESS_TOKEN
 - Assignment user dengan `outletId: null` berlaku pada seluruh outlet tenant.
 - Perubahan role/permission berlaku pada access token berikutnya. Lakukan login ulang atau refresh token untuk mengambil klaim terbaru.
 - Seluruh ID dari request tetap diverifikasi terhadap `tenantId` pengguna; ID tenant lain akan ditolak/tidak ditemukan.
+- Total anggaran dihitung server dari seluruh `budget_lines`; `actual_amount` tidak menerima input manual dari client.
+- Hanya status `draft` atau `rejected` yang dapat diubah. Anggaran `approved` bersifat immutable dan hanya dapat ditutup.
+- Anggaran approved dengan nama, outlet, dan periode yang beririsan akan ditolak untuk mencegah baseline ganda.
+- Setelah permission Budget Planning ditambahkan, jalankan kembali `npm.cmd run db:seed`, lalu login ulang agar access token memuat permission terbaru.
 - Untuk lokal, koneksi dapat memakai user `postgres`. Sebelum production, gunakan database role khusus aplikasi dan secret manager.
 
 ## Struktur migration
