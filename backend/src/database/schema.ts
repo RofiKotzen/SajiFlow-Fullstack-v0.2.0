@@ -1,15 +1,18 @@
 import {
   boolean,
+  bigint,
   char,
   customType,
   date,
   index,
   inet,
   jsonb,
+  integer,
   numeric,
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   time,
   timestamp,
@@ -46,6 +49,25 @@ export const budgetCategory = pgEnum("budget_category", [
   "maintenance",
   "marketing",
   "other",
+]);
+export const unitDimension = pgEnum("unit_dimension", [
+  "mass",
+  "volume",
+  "count",
+  "length",
+]);
+export const valuationMethod = pgEnum("valuation_method", [
+  "weighted_average",
+  "fifo",
+]);
+export const purchaseOrderStatus = pgEnum("purchase_order_status", [
+  "draft",
+  "approved",
+  "sent",
+  "partially_received",
+  "received",
+  "closed",
+  "cancelled",
 ]);
 
 const auditColumns = {
@@ -225,6 +247,155 @@ export const auditLogs = pgTable("audit_logs", {
     .defaultNow(),
 });
 
+export const documentSequences = pgTable(
+  "document_sequences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    documentType: varchar("document_type", { length: 40 }).notNull(),
+    businessDate: date("business_date").notNull(),
+    lastNumber: bigint("last_number", { mode: "number" }).notNull().default(0),
+    prefixPattern: varchar("prefix_pattern", { length: 80 }).notNull(),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_document_sequence").on(
+      table.tenantId,
+      table.outletId,
+      table.documentType,
+      table.businessDate,
+    ),
+  ],
+);
+
+export const units = pgTable(
+  "units",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    code: varchar("code", { length: 20 }).notNull(),
+    name: varchar("name", { length: 80 }).notNull(),
+    dimension: unitDimension("dimension").notNull(),
+    isBase: boolean("is_base").notNull().default(false),
+    decimalScale: smallint("decimal_scale").notNull().default(3),
+    isActive: boolean("is_active").notNull().default(true),
+    ...auditColumns,
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
+  },
+  (table) => [
+    uniqueIndex("uq_units_tenant_code")
+      .on(table.tenantId, table.code)
+      .where(sql`${table.deletedAt} is null`),
+    index("ix_units_tenant_id").on(table.tenantId),
+  ],
+);
+
+export const ingredientCategories = pgTable("ingredient_categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  parentId: uuid("parent_id"),
+  isActive: boolean("is_active").notNull().default(true),
+  ...auditColumns,
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  deletedBy: uuid("deleted_by"),
+});
+
+export const ingredients = pgTable(
+  "ingredients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    sku: varchar("sku", { length: 50 }).notNull(),
+    name: varchar("name", { length: 150 }).notNull(),
+    categoryId: uuid("category_id"),
+    baseUnitId: uuid("base_unit_id").notNull(),
+    valuationMethod: valuationMethod("valuation_method")
+      .notNull()
+      .default("weighted_average"),
+    isPerishable: boolean("is_perishable").notNull().default(false),
+    shelfLifeDays: integer("shelf_life_days"),
+    barcode: varchar("barcode", { length: 100 }),
+    isActive: boolean("is_active").notNull().default(true),
+    ...auditColumns,
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
+  },
+  (table) => [
+    uniqueIndex("uq_ingredients_tenant_sku")
+      .on(table.tenantId, table.sku)
+      .where(sql`${table.deletedAt} is null`),
+    index("ix_ingredients_tenant_id").on(table.tenantId),
+    index("ix_ingredients_category_id").on(table.categoryId),
+  ],
+);
+
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    code: varchar("code", { length: 40 }).notNull(),
+    name: varchar("name", { length: 150 }).notNull(),
+    taxId: varchar("tax_id", { length: 40 }),
+    contactName: varchar("contact_name", { length: 120 }),
+    phone: varchar("phone", { length: 30 }),
+    email: citext("email"),
+    address: text("address"),
+    paymentTermDays: integer("payment_term_days").notNull().default(0),
+    leadTimeDays: integer("lead_time_days").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    ...auditColumns,
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
+  },
+  (table) => [
+    index("ix_suppliers_tenant_id").on(table.tenantId),
+    index("ix_suppliers_created_by").on(table.createdBy),
+  ],
+);
+
+export const supplierIngredients = pgTable(
+  "supplier_ingredients",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    supplierId: uuid("supplier_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    supplierSku: varchar("supplier_sku", { length: 80 }),
+    purchaseUnitId: uuid("purchase_unit_id").notNull(),
+    conversionToBase: numeric("conversion_to_base", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    lastPrice: numeric("last_price", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }),
+    minimumOrderQty: numeric("minimum_order_qty", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(1),
+    isPreferred: boolean("is_preferred").notNull().default(false),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_supplier_catalog").on(
+      table.supplierId,
+      table.ingredientId,
+      table.purchaseUnitId,
+    ),
+    index("ix_supplier_ingredients_tenant_id").on(table.tenantId),
+  ],
+);
+
 export const budgets = pgTable(
   "budgets",
   {
@@ -315,5 +486,120 @@ export const budgetStatusHistory = pgTable(
   (table) => [
     index("ix_budget_status_history_tenant_id").on(table.tenantId),
     index("ix_budget_status_history_budget_id").on(table.budgetId),
+  ],
+);
+
+export const purchaseOrders = pgTable(
+  "purchase_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    poNo: varchar("po_no", { length: 50 }).notNull(),
+    supplierId: uuid("supplier_id").notNull(),
+    purchaseRequestId: uuid("purchase_request_id"),
+    orderDate: date("order_date").notNull(),
+    expectedDate: date("expected_date"),
+    status: purchaseOrderStatus("status").notNull().default("draft"),
+    subtotal: numeric("subtotal", { precision: 18, scale: 2, mode: "number" })
+      .notNull()
+      .default(0),
+    discountAmount: numeric("discount_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    taxAmount: numeric("tax_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    shippingAmount: numeric("shipping_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    grandTotal: numeric("grand_total", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    currencyCode: char("currency_code", { length: 3 }).notNull().default("IDR"),
+    notes: text("notes"),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_po_no").on(table.outletId, table.poNo),
+    index("ix_purchase_orders_tenant_id").on(table.tenantId),
+    index("ix_purchase_orders_outlet_id").on(table.outletId),
+    index("ix_purchase_orders_supplier_id").on(table.supplierId),
+  ],
+);
+
+export const purchaseOrderItems = pgTable(
+  "purchase_order_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    purchaseOrderId: uuid("purchase_order_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    quantityOrdered: numeric("quantity_ordered", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
+    purchaseUnitId: uuid("purchase_unit_id").notNull(),
+    conversionToBase: numeric("conversion_to_base", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    unitPrice: numeric("unit_price", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    discountAmount: numeric("discount_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    taxAmount: numeric("tax_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    lineTotal: numeric("line_total", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    quantityReceived: numeric("quantity_received", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    ...auditColumns,
+  },
+  (table) => [
+    index("ix_purchase_order_items_tenant_id").on(table.tenantId),
+    index("ix_purchase_order_items_purchase_order_id").on(
+      table.purchaseOrderId,
+    ),
+    index("ix_purchase_order_items_ingredient_id").on(table.ingredientId),
   ],
 );

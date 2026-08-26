@@ -1,8 +1,8 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { drizzle, PostgresJsDatabase } from 'drizzle-orm/postgres-js';
-import postgres, { Sql } from 'postgres';
-import * as schema from './schema';
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { drizzle, PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres, { Sql } from "postgres";
+import * as schema from "./schema";
 
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
@@ -10,8 +10,9 @@ export class DatabaseService implements OnModuleDestroy {
   readonly db: PostgresJsDatabase<typeof schema>;
 
   constructor(config: ConfigService) {
-    const ssl = config.get<string>('DATABASE_SSL') === 'true' ? 'require' : false;
-    this.client = postgres(config.getOrThrow<string>('DATABASE_URL'), {
+    const ssl =
+      config.get<string>("DATABASE_SSL") === "true" ? "require" : false;
+    this.client = postgres(config.getOrThrow<string>("DATABASE_URL"), {
       ssl,
       max: 10,
       idle_timeout: 20,

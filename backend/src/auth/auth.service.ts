@@ -1,13 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
-import {
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
-import { compare } from 'bcryptjs';
-import { and, eq, gt, isNull, or } from 'drizzle-orm';
-import { DatabaseService } from '../database/database.service';
+import { createHash, randomUUID } from "node:crypto";
+import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { JwtService } from "@nestjs/jwt";
+import { compare } from "bcryptjs";
+import { and, eq, gt, isNull, or } from "drizzle-orm";
+import { DatabaseService } from "../database/database.service";
 import {
   permissions,
   refreshTokens,
@@ -17,9 +14,9 @@ import {
   userCredentials,
   userRoles,
   users,
-} from '../database/schema';
-import { JwtPayload } from '../common/types/auth-user';
-import { LoginDto } from './dto/login.dto';
+} from "../database/schema";
+import { JwtPayload } from "../common/types/auth-user";
+import { LoginDto } from "./dto/login.dto";
 
 interface RequestMeta {
   ipAddress?: string;
@@ -36,7 +33,10 @@ export class AuthService {
 
   async login(dto: LoginDto, meta: RequestMeta) {
     const normalizedEmail = dto.email.trim().toLowerCase();
-    const conditions = [eq(users.email, normalizedEmail), isNull(users.deletedAt)];
+    const conditions = [
+      eq(users.email, normalizedEmail),
+      isNull(users.deletedAt),
+    ];
     if (dto.tenantCode) conditions.push(eq(tenants.code, dto.tenantCode));
 
     const [account] = await this.database.db
@@ -53,19 +53,31 @@ export class AuthService {
       .where(and(...conditions))
       .limit(1);
 
-    if (!account || account.userStatus !== 'active' || !['active', 'trial'].includes(account.tenantStatus)) {
-      throw new UnauthorizedException('Email atau password salah');
+    if (
+      !account ||
+      account.userStatus !== "active" ||
+      !["active", "trial"].includes(account.tenantStatus)
+    ) {
+      throw new UnauthorizedException("Email atau password salah");
     }
 
     const [credential] = await this.database.db
       .select()
       .from(userCredentials)
-      .where(and(eq(userCredentials.userId, account.userId), eq(userCredentials.tenantId, account.tenantId)))
+      .where(
+        and(
+          eq(userCredentials.userId, account.userId),
+          eq(userCredentials.tenantId, account.tenantId),
+        ),
+      )
       .limit(1);
 
-    if (!credential) throw new UnauthorizedException('Email atau password salah');
+    if (!credential)
+      throw new UnauthorizedException("Email atau password salah");
     if (credential.lockedUntil && credential.lockedUntil > new Date()) {
-      throw new UnauthorizedException('Akun terkunci sementara. Coba lagi setelah 15 menit.');
+      throw new UnauthorizedException(
+        "Akun terkunci sementara. Coba lagi setelah 15 menit.",
+      );
     }
 
     const validPassword = await compare(dto.password, credential.passwordHash);
@@ -75,10 +87,11 @@ export class AuthService {
         .update(userCredentials)
         .set({
           failedAttempts: attempts,
-          lockedUntil: attempts >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
+          lockedUntil:
+            attempts >= 5 ? new Date(Date.now() + 15 * 60_000) : null,
         })
         .where(eq(userCredentials.userId, account.userId));
-      throw new UnauthorizedException('Email atau password salah');
+      throw new UnauthorizedException("Email atau password salah");
     }
 
     await this.database.db
@@ -90,7 +103,8 @@ export class AuthService {
       .set({ lastLoginAt: new Date() })
       .where(eq(users.id, account.userId));
 
-    const { refreshTokenId: _refreshTokenId, ...response } = await this.issueSession(account, meta);
+    const { refreshTokenId: _refreshTokenId, ...response } =
+      await this.issueSession(account, meta);
     return response;
   }
 
@@ -98,11 +112,13 @@ export class AuthService {
     let payload: JwtPayload;
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(rawToken, {
-        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        secret: this.config.getOrThrow<string>("JWT_REFRESH_SECRET"),
       });
-      if (payload.type !== 'refresh') throw new Error('Wrong token type');
+      if (payload.type !== "refresh") throw new Error("Wrong token type");
     } catch {
-      throw new UnauthorizedException('Refresh token tidak valid atau kedaluwarsa');
+      throw new UnauthorizedException(
+        "Refresh token tidak valid atau kedaluwarsa",
+      );
     }
 
     const tokenHash = this.hashToken(rawToken);
@@ -118,10 +134,13 @@ export class AuthService {
         ),
       )
       .limit(1);
-    if (!stored) throw new UnauthorizedException('Refresh token sudah dicabut atau kedaluwarsa');
+    if (!stored)
+      throw new UnauthorizedException(
+        "Refresh token sudah dicabut atau kedaluwarsa",
+      );
 
     const account = await this.getAccount(payload.sub, payload.tenant_id);
-    if (!account) throw new UnauthorizedException('Akun tidak lagi aktif');
+    if (!account) throw new UnauthorizedException("Akun tidak lagi aktif");
 
     await this.database.db
       .update(refreshTokens)
@@ -140,22 +159,35 @@ export class AuthService {
     await this.database.db
       .update(refreshTokens)
       .set({ revokedAt: new Date() })
-      .where(and(eq(refreshTokens.tokenHash, this.hashToken(rawToken)), isNull(refreshTokens.revokedAt)));
+      .where(
+        and(
+          eq(refreshTokens.tokenHash, this.hashToken(rawToken)),
+          isNull(refreshTokens.revokedAt),
+        ),
+      );
     return { success: true };
   }
 
   async me(userId: string, tenantId: string) {
     const account = await this.getAccount(userId, tenantId);
-    if (!account) throw new UnauthorizedException('Akun tidak ditemukan');
+    if (!account) throw new UnauthorizedException("Akun tidak ditemukan");
     const context = await this.getAccessContext(userId, tenantId);
     return { ...account, ...context };
   }
 
   private async issueSession(
-    account: { userId: string; tenantId: string; email: string; fullName: string },
+    account: {
+      userId: string;
+      tenantId: string;
+      email: string;
+      fullName: string;
+    },
     meta: RequestMeta,
   ) {
-    const context = await this.getAccessContext(account.userId, account.tenantId);
+    const context = await this.getAccessContext(
+      account.userId,
+      account.tenantId,
+    );
     const base = {
       sub: account.userId,
       tenant_id: account.tenantId,
@@ -165,15 +197,25 @@ export class AuthService {
       permissions: context.permissions,
       outlet_ids: context.outletIds,
     };
-    const accessTtl = parseDuration(this.config.get<string>('JWT_ACCESS_TTL') ?? '15m');
-    const refreshTtl = parseDuration(this.config.get<string>('JWT_REFRESH_TTL') ?? '7d');
+    const accessTtl = parseDuration(
+      this.config.get<string>("JWT_ACCESS_TTL") ?? "15m",
+    );
+    const refreshTtl = parseDuration(
+      this.config.get<string>("JWT_REFRESH_TTL") ?? "7d",
+    );
     const accessToken = await this.jwt.signAsync(
-      { ...base, type: 'access', jti: randomUUID() },
-      { secret: this.config.getOrThrow('JWT_ACCESS_SECRET'), expiresIn: accessTtl },
+      { ...base, type: "access", jti: randomUUID() },
+      {
+        secret: this.config.getOrThrow("JWT_ACCESS_SECRET"),
+        expiresIn: accessTtl,
+      },
     );
     const refreshToken = await this.jwt.signAsync(
-      { ...base, type: 'refresh', jti: randomUUID() },
-      { secret: this.config.getOrThrow('JWT_REFRESH_SECRET'), expiresIn: refreshTtl },
+      { ...base, type: "refresh", jti: randomUUID() },
+      {
+        secret: this.config.getOrThrow("JWT_REFRESH_SECRET"),
+        expiresIn: refreshTtl,
+      },
     );
     const [stored] = await this.database.db
       .insert(refreshTokens)
@@ -190,7 +232,7 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
-      tokenType: 'Bearer',
+      tokenType: "Bearer",
       expiresIn: accessTtl,
       refreshTokenId: stored.id,
       user: { ...account, ...context },
@@ -211,8 +253,8 @@ export class AuthService {
         and(
           eq(users.id, userId),
           eq(users.tenantId, tenantId),
-          eq(users.status, 'active'),
-          or(eq(tenants.status, 'active'), eq(tenants.status, 'trial')),
+          eq(users.status, "active"),
+          or(eq(tenants.status, "active"), eq(tenants.status, "trial")),
           isNull(users.deletedAt),
         ),
       )
@@ -229,7 +271,10 @@ export class AuthService {
         and(
           eq(userRoles.userId, userId),
           eq(userRoles.tenantId, tenantId),
-          or(isNull(userRoles.validUntil), gt(userRoles.validUntil, new Date())),
+          or(
+            isNull(userRoles.validUntil),
+            gt(userRoles.validUntil, new Date()),
+          ),
           isNull(roles.deletedAt),
         ),
       );
@@ -242,18 +287,25 @@ export class AuthService {
         and(
           eq(userRoles.userId, userId),
           eq(userRoles.tenantId, tenantId),
-          or(isNull(userRoles.validUntil), gt(userRoles.validUntil, new Date())),
+          or(
+            isNull(userRoles.validUntil),
+            gt(userRoles.validUntil, new Date()),
+          ),
         ),
       );
     return {
       roles: [...new Set(assignments.map((item) => item.roleCode))],
-      outletIds: [...new Set(assignments.flatMap((item) => (item.outletId ? [item.outletId] : [])))],
+      outletIds: [
+        ...new Set(
+          assignments.flatMap((item) => (item.outletId ? [item.outletId] : [])),
+        ),
+      ],
       permissions: granted.map((item) => item.code),
     };
   }
 
   private hashToken(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
+    return createHash("sha256").update(token).digest("hex");
   }
 }
 
@@ -267,5 +319,8 @@ function parseDuration(value: string): number {
 
 function normalizeIp(value?: string): string | undefined {
   if (!value) return undefined;
-  return value.replace(/^::ffff:/, '').split(',')[0].trim();
+  return value
+    .replace(/^::ffff:/, "")
+    .split(",")[0]
+    .trim();
 }

@@ -29,7 +29,7 @@ async function bootstrap(): Promise<void> {
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Saji Flow API")
     .setDescription("API operasional terpadu Saji Flow")
-    .setVersion("0.3.0")
+    .setVersion("0.4.0")
     .addBearerAuth()
     .build();
   SwaggerModule.setup(

@@ -1,15 +1,20 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { hash } from "bcryptjs";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
   outlets,
   permissions,
+  ingredientCategories,
+  ingredients,
   rolePermissions,
   roles,
+  supplierIngredients,
+  suppliers,
   tenants,
+  units,
   userCredentials,
   userRoles,
   users,
@@ -42,6 +47,29 @@ const permissionSeed = [
   ["budgets.approve", "budgets", "Menyetujui anggaran"],
   ["budgets.reject", "budgets", "Menolak anggaran dengan alasan"],
   ["budgets.close", "budgets", "Menutup periode anggaran approved"],
+  ["purchase_orders.read", "purchase_orders", "Melihat purchase order"],
+  ["purchase_orders.create", "purchase_orders", "Membuat purchase order draft"],
+  [
+    "purchase_orders.update",
+    "purchase_orders",
+    "Mengubah purchase order draft",
+  ],
+  ["purchase_orders.approve", "purchase_orders", "Menyetujui purchase order"],
+  [
+    "purchase_orders.send",
+    "purchase_orders",
+    "Menandai purchase order telah dikirim",
+  ],
+  [
+    "purchase_orders.cancel",
+    "purchase_orders",
+    "Membatalkan purchase order dengan alasan",
+  ],
+  [
+    "purchase_orders.close",
+    "purchase_orders",
+    "Menutup purchase order yang telah diterima",
+  ],
 ] as const;
 
 async function main(): Promise<void> {
@@ -169,10 +197,312 @@ async function main(): Promise<void> {
       });
     }
 
+    const shouldSeedSamples =
+      process.env.SEED_SAMPLE_DATA === "true" ||
+      (process.env.SEED_SAMPLE_DATA === undefined &&
+        process.env.NODE_ENV !== "production");
+    if (shouldSeedSamples) {
+      const unitSpecs = [
+        { code: "KG", name: "Kilogram", dimension: "mass", decimalScale: 3 },
+        { code: "L", name: "Liter", dimension: "volume", decimalScale: 3 },
+        { code: "PCS", name: "Pieces", dimension: "count", decimalScale: 0 },
+      ] as const;
+      const unitMap = new Map<string, typeof units.$inferSelect>();
+      for (const spec of unitSpecs) {
+        let [unit] = await db
+          .select()
+          .from(units)
+          .where(
+            and(
+              eq(units.tenantId, tenant.id),
+              eq(units.code, spec.code),
+              isNull(units.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!unit) {
+          [unit] = await db
+            .insert(units)
+            .values({
+              tenantId: tenant.id,
+              code: spec.code,
+              name: spec.name,
+              dimension: spec.dimension,
+              isBase: true,
+              decimalScale: spec.decimalScale,
+              createdBy: admin.id,
+              updatedBy: admin.id,
+            })
+            .returning();
+        }
+        unitMap.set(spec.code, unit);
+      }
+
+      const categoryNames = [
+        "Fresh Produce",
+        "Meat & Poultry",
+        "Dry Goods",
+        "Dairy",
+        "Beverage",
+        "Packaging",
+      ];
+      const categoryMap = new Map<
+        string,
+        typeof ingredientCategories.$inferSelect
+      >();
+      for (const name of categoryNames) {
+        let [category] = await db
+          .select()
+          .from(ingredientCategories)
+          .where(
+            and(
+              eq(ingredientCategories.tenantId, tenant.id),
+              eq(ingredientCategories.name, name),
+              isNull(ingredientCategories.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!category) {
+          [category] = await db
+            .insert(ingredientCategories)
+            .values({
+              tenantId: tenant.id,
+              name,
+              createdBy: admin.id,
+              updatedBy: admin.id,
+            })
+            .returning();
+        }
+        categoryMap.set(name, category);
+      }
+
+      const ingredientSpecs = [
+        {
+          sku: "ING-AVOCADO",
+          name: "Avocado Hass",
+          category: "Fresh Produce",
+          unit: "KG",
+          perishable: true,
+          shelfLife: 5,
+        },
+        {
+          sku: "ING-ROMAINE",
+          name: "Romaine Lettuce",
+          category: "Fresh Produce",
+          unit: "KG",
+          perishable: true,
+          shelfLife: 4,
+        },
+        {
+          sku: "ING-BEEF",
+          name: "Beef Tenderloin",
+          category: "Meat & Poultry",
+          unit: "KG",
+          perishable: true,
+          shelfLife: 5,
+        },
+        {
+          sku: "ING-CHICKEN",
+          name: "Chicken Breast",
+          category: "Meat & Poultry",
+          unit: "KG",
+          perishable: true,
+          shelfLife: 4,
+        },
+        {
+          sku: "ING-PASTA",
+          name: "Fettuccine Pasta",
+          category: "Dry Goods",
+          unit: "KG",
+          perishable: false,
+        },
+        {
+          sku: "ING-CREAM",
+          name: "Cooking Cream",
+          category: "Dairy",
+          unit: "L",
+          perishable: true,
+          shelfLife: 14,
+        },
+        {
+          sku: "ING-MILK",
+          name: "Fresh Milk",
+          category: "Dairy",
+          unit: "L",
+          perishable: true,
+          shelfLife: 7,
+        },
+        {
+          sku: "ING-COFFEE",
+          name: "Espresso Beans",
+          category: "Beverage",
+          unit: "KG",
+          perishable: false,
+        },
+        {
+          sku: "ING-CUP",
+          name: "Paper Cup 12 oz",
+          category: "Packaging",
+          unit: "PCS",
+          perishable: false,
+        },
+      ] as const;
+      const ingredientMap = new Map<string, typeof ingredients.$inferSelect>();
+      for (const spec of ingredientSpecs) {
+        let [ingredient] = await db
+          .select()
+          .from(ingredients)
+          .where(
+            and(
+              eq(ingredients.tenantId, tenant.id),
+              eq(ingredients.sku, spec.sku),
+              isNull(ingredients.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!ingredient) {
+          [ingredient] = await db
+            .insert(ingredients)
+            .values({
+              tenantId: tenant.id,
+              sku: spec.sku,
+              name: spec.name,
+              categoryId: categoryMap.get(spec.category)!.id,
+              baseUnitId: unitMap.get(spec.unit)!.id,
+              isPerishable: spec.perishable,
+              shelfLifeDays: "shelfLife" in spec ? spec.shelfLife : undefined,
+              createdBy: admin.id,
+              updatedBy: admin.id,
+            })
+            .returning();
+        }
+        ingredientMap.set(spec.sku, ingredient);
+      }
+
+      const supplierSpecs = [
+        {
+          code: "SUP-001",
+          name: "PT Segar Pangan Nusantara",
+          contact: "Maya",
+          phone: "0812-0000-1001",
+          terms: 14,
+          lead: 1,
+        },
+        {
+          code: "SUP-002",
+          name: "Sumber Protein Sejahtera",
+          contact: "Ardi",
+          phone: "0812-0000-1002",
+          terms: 14,
+          lead: 2,
+        },
+        {
+          code: "SUP-003",
+          name: "CV Bumi Rempah",
+          contact: "Rian",
+          phone: "0812-0000-1003",
+          terms: 30,
+          lead: 3,
+        },
+        {
+          code: "SUP-004",
+          name: "Dairyland Cianjur",
+          contact: "Sinta",
+          phone: "0812-0000-1004",
+          terms: 14,
+          lead: 1,
+        },
+        {
+          code: "SUP-005",
+          name: "Kemasan Prima",
+          contact: "Bimo",
+          phone: "0812-0000-1005",
+          terms: 30,
+          lead: 3,
+        },
+      ] as const;
+      const supplierMap = new Map<string, typeof suppliers.$inferSelect>();
+      for (const spec of supplierSpecs) {
+        let [supplier] = await db
+          .select()
+          .from(suppliers)
+          .where(
+            and(
+              eq(suppliers.tenantId, tenant.id),
+              eq(suppliers.code, spec.code),
+              isNull(suppliers.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!supplier) {
+          [supplier] = await db
+            .insert(suppliers)
+            .values({
+              tenantId: tenant.id,
+              code: spec.code,
+              name: spec.name,
+              contactName: spec.contact,
+              phone: spec.phone,
+              paymentTermDays: spec.terms,
+              leadTimeDays: spec.lead,
+              createdBy: admin.id,
+              updatedBy: admin.id,
+            })
+            .returning();
+        }
+        supplierMap.set(spec.code, supplier);
+      }
+
+      const catalogSpecs = [
+        ["SUP-001", "ING-AVOCADO", 90000],
+        ["SUP-001", "ING-ROMAINE", 42000],
+        ["SUP-002", "ING-BEEF", 245000],
+        ["SUP-002", "ING-CHICKEN", 65000],
+        ["SUP-003", "ING-PASTA", 36000],
+        ["SUP-003", "ING-COFFEE", 185000],
+        ["SUP-004", "ING-CREAM", 85000],
+        ["SUP-004", "ING-MILK", 25000],
+        ["SUP-005", "ING-CUP", 2500],
+      ] as const;
+      for (const [supplierCode, ingredientSku, lastPrice] of catalogSpecs) {
+        const supplier = supplierMap.get(supplierCode)!;
+        const ingredient = ingredientMap.get(ingredientSku)!;
+        const [existingCatalog] = await db
+          .select({ id: supplierIngredients.id })
+          .from(supplierIngredients)
+          .where(
+            and(
+              eq(supplierIngredients.tenantId, tenant.id),
+              eq(supplierIngredients.supplierId, supplier.id),
+              eq(supplierIngredients.ingredientId, ingredient.id),
+              eq(supplierIngredients.purchaseUnitId, ingredient.baseUnitId),
+            ),
+          )
+          .limit(1);
+        if (!existingCatalog) {
+          await db.insert(supplierIngredients).values({
+            tenantId: tenant.id,
+            supplierId: supplier.id,
+            ingredientId: ingredient.id,
+            purchaseUnitId: ingredient.baseUnitId,
+            conversionToBase: 1,
+            lastPrice,
+            minimumOrderQty: 1,
+            isPreferred: true,
+            createdBy: admin.id,
+            updatedBy: admin.id,
+          });
+        }
+      }
+    }
+
     console.log("Seed selesai");
     console.log(`Tenant : ${tenant.code} (${tenant.id})`);
     console.log(`Outlet : ${outlet.code} (${outlet.id})`);
     console.log(`Admin  : ${admin.email}`);
+    console.log(
+      `Sample : ${shouldSeedSamples ? "master bahan & supplier siap" : "dilewati"}`,
+    );
   } finally {
     await client.end({ timeout: 5 });
   }

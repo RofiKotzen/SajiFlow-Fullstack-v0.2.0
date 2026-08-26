@@ -1,5 +1,5 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { ApiPropertyOptional } from "@nestjs/swagger";
+import { IsIn, IsOptional, IsString, Length, Matches } from "class-validator";
 
 export class UpdateUserDto {
   @ApiPropertyOptional()
@@ -16,8 +16,8 @@ export class UpdateUserDto {
   @IsOptional()
   @Matches(/^\+?[0-9 ()-]{7,30}$/)
   phone?: string;
-  @ApiPropertyOptional({ enum: ['invited', 'active', 'suspended', 'disabled'] })
+  @ApiPropertyOptional({ enum: ["invited", "active", "suspended", "disabled"] })
   @IsOptional()
-  @IsIn(['invited', 'active', 'suspended', 'disabled'])
-  status?: 'invited' | 'active' | 'suspended' | 'disabled';
+  @IsIn(["invited", "active", "suspended", "disabled"])
+  status?: "invited" | "active" | "suspended" | "disabled";
 }

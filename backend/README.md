@@ -1,6 +1,6 @@
-# Saji Flow Backend v0.3.0
+# Saji Flow Backend v0.4.0
 
-Fondasi backend Saji Flow untuk PostgreSQL: koneksi database, autentikasi JWT, tenant, outlet, user, role, permission, dan Budget Planning.
+Backend Saji Flow untuk PostgreSQL: autentikasi dan organisasi, Budget Planning, serta Purchase Order.
 
 ## Cakupan
 
@@ -17,6 +17,7 @@ Fondasi backend Saji Flow untuk PostgreSQL: koneksi database, autentikasi JWT, t
 - Migration runner yang mengenali schema v1.1 yang sudah pernah dijalankan.
 - Seed tenant, outlet, permission, role Super Admin, dan admin pertama.
 - Budget Planning multi-outlet dengan alokasi, realisasi, approval workflow, audit, dan histori status.
+- Purchase Order multi-outlet dengan katalog supplier, snapshot harga/konversi, kalkulasi server, workflow, dan audit trail.
 
 ## Persyaratan
 
@@ -132,6 +133,13 @@ Bearer ACCESS_TOKEN
 | POST      | `/api/v1/budgets/:id/approve`   | `budgets.approve`          | Setujui anggaran                                    |
 | POST      | `/api/v1/budgets/:id/reject`    | `budgets.reject`           | Tolak anggaran dengan alasan                        |
 | POST      | `/api/v1/budgets/:id/close`     | `budgets.close`            | Tutup periode anggaran                              |
+| GET/POST  | `/api/v1/purchase-orders`       | `purchase_orders.read/create` | Daftar/buat draft PO                             |
+| GET       | `/api/v1/purchase-orders/lookups` | `purchase_orders.read`   | Supplier dan katalog bahan aktif                    |
+| GET/PATCH | `/api/v1/purchase-orders/:id`   | `purchase_orders.read/update` | Detail/ubah draft PO                            |
+| POST      | `/api/v1/purchase-orders/:id/approve` | `purchase_orders.approve` | Setujui draft PO                              |
+| POST      | `/api/v1/purchase-orders/:id/send` | `purchase_orders.send`  | Tandai PO telah dikirim ke supplier                 |
+| POST      | `/api/v1/purchase-orders/:id/cancel` | `purchase_orders.cancel` | Batalkan PO dengan alasan wajib                 |
+| POST      | `/api/v1/purchase-orders/:id/close` | `purchase_orders.close` | Tutup PO yang sudah diterima                      |
 
 ## Aturan penting
 
@@ -146,6 +154,11 @@ Bearer ACCESS_TOKEN
 - Hanya status `draft` atau `rejected` yang dapat diubah. Anggaran `approved` bersifat immutable dan hanya dapat ditutup.
 - Anggaran approved dengan nama, outlet, dan periode yang beririsan akan ditolak untuk mencegah baseline ganda.
 - Setelah permission Budget Planning ditambahkan, jalankan kembali `npm.cmd run db:seed`, lalu login ulang agar access token memuat permission terbaru.
+- Setelah memasang v0.4.0, jalankan kembali `npm.cmd run db:seed` untuk menambahkan permission Purchase Order dan contoh master supplier, bahan, satuan, serta katalog. Seed aman dijalankan berulang.
+- Nomor PO dibuat otomatis per outlet dan tanggal. Subtotal, diskon, pajak, biaya kirim, grand total, MOQ, dan konversi satuan diverifikasi kembali oleh server.
+- Harga dan konversi satuan disimpan sebagai snapshot pada item PO. Draft dapat diubah; PO yang sudah disetujui tidak dapat diedit.
+- Alur PO adalah `draft → approved → sent → partially_received/received → closed`. Status penerimaan hanya akan diubah oleh modul Goods Receipt, bukan secara manual dari Purchase Order.
+- PO `draft`, `approved`, atau `sent` dapat dibatalkan bila belum menerima barang; alasan pembatalan wajib diisi.
 - Untuk lokal, koneksi dapat memakai user `postgres`. Sebelum production, gunakan database role khusus aplikasi dan secret manager.
 
 ## Struktur migration

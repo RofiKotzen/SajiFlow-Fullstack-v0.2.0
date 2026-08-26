@@ -11,6 +11,7 @@ import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { OutletsModule } from "./outlets/outlets.module";
 import { PermissionsModule } from "./permissions/permissions.module";
+import { PurchaseOrdersModule } from "./purchase-orders/purchase-orders.module";
 import { RolesModule } from "./roles/roles.module";
 import { TenantsModule } from "./tenants/tenants.module";
 import { UsersModule } from "./users/users.module";
@@ -32,6 +33,7 @@ import { UsersModule } from "./users/users.module";
     UsersModule,
     RolesModule,
     PermissionsModule,
+    PurchaseOrdersModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

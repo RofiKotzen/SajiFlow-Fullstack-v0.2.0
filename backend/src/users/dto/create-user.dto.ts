@@ -1,5 +1,11 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
+import {
+  IsEmail,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+} from "class-validator";
 
 export class CreateUserDto {
   @ApiProperty()
@@ -18,8 +24,11 @@ export class CreateUserDto {
   @IsOptional()
   @Matches(/^\+?[0-9 ()-]{7,30}$/)
   phone?: string;
-  @ApiProperty({ minLength: 12, example: 'PasswordKuat123!' })
+  @ApiProperty({ minLength: 12, example: "PasswordKuat123!" })
   @Length(12, 128)
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/, { message: 'password harus berisi huruf kecil, huruf besar, angka, dan simbol' })
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/, {
+    message:
+      "password harus berisi huruf kecil, huruf besar, angka, dan simbol",
+  })
   password: string;
 }

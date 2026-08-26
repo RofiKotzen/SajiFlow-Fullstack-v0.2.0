@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { DatabaseService } from '../database/database.service';
-import { auditLogs } from '../database/schema';
+import { Injectable } from "@nestjs/common";
+import { DatabaseService } from "../database/database.service";
+import { auditLogs } from "../database/schema";
 
 export interface AuditEntry {
   tenantId: string;

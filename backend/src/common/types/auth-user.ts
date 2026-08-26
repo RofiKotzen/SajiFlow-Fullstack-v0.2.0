@@ -6,7 +6,7 @@ export interface AuthUser {
   roles: string[];
   permissions: string[];
   outletIds: string[];
-  tokenType: 'access';
+  tokenType: "access";
 }
 
 export interface JwtPayload {
@@ -17,6 +17,6 @@ export interface JwtPayload {
   roles: string[];
   permissions: string[];
   outlet_ids: string[];
-  type: 'access' | 'refresh';
+  type: "access" | "refresh";
   jti: string;
 }

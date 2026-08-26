@@ -8,7 +8,7 @@ if (-not (Test-Path ".env")) {
 
 Write-Host "Menjalankan migration database..." -ForegroundColor Cyan
 npm.cmd run db:migrate
-Write-Host "Membuat tenant, outlet, role, permission, dan admin awal..." -ForegroundColor Cyan
+Write-Host "Membuat tenant, outlet, role, permission, admin, dan master data contoh..." -ForegroundColor Cyan
 npm.cmd run db:seed
 Write-Host "`nDatabase Saji Flow siap digunakan." -ForegroundColor Green
 Set-Location $ProjectRoot
