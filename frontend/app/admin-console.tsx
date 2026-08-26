@@ -23,7 +23,7 @@ export function AdminConsole({ session, api, notify }: { session: AuthSession; a
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [dialog, setDialog] = useState<"outlet" | "user" | "role" | "assign-role" | "assign-permission" | null>(null);
+  const [dialog, setDialog] = useState<"outlet" | "user" | "role" | "password" | "assign-role" | "assign-permission" | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedRole, setSelectedRole] = useState<Role | null>(null);
 
@@ -84,7 +84,7 @@ export function AdminConsole({ session, api, notify }: { session: AuthSession; a
         <div className="admin-table"><div className="admin-row admin-head"><span>Kode</span><span>Outlet</span><span>Zona waktu</span><span>Status</span><span /></div>{outlets.map((outlet) => <div className="admin-row" key={outlet.id}><b>{outlet.code}</b><span><strong>{outlet.name}</strong><small>{outlet.address || "Alamat belum diisi"}</small></span><span>{outlet.timezone}</span><Status value={outlet.isActive ? "Aktif" : "Nonaktif"} /><button disabled={!can("outlets.update")} onClick={() => void toggleOutlet(outlet)}>{outlet.isActive ? "Nonaktifkan" : "Aktifkan"}</button></div>)}</div>
       </DataPanel>}
       {tab === "users" && <DataPanel title="Pengguna" count={users.length} action={can("users.create") ? () => setDialog("user") : undefined} actionLabel="Tambah user">
-        <div className="admin-table"><div className="admin-row user admin-head"><span>Nama</span><span>Email</span><span>Status</span><span>Role</span><span /></div>{users.map((user) => <div className="admin-row user" key={user.id}><span><strong>{user.fullName}</strong><small>{user.employeeCode || "Tanpa kode karyawan"}</small></span><span>{user.email}</span><Status value={user.status} /><span>{user.assignments?.map((item) => item.roleName).join(", ") || "Belum ditetapkan"}</span><div className="row-actions"><button disabled={!can("users.assign_roles")} onClick={() => void openRoleAssignment(user)}>Atur role</button><button disabled={!can("users.update")} onClick={() => void toggleUser(user)}>{user.status === "active" ? "Suspend" : "Aktifkan"}</button></div></div>)}</div>
+        <div className="admin-table"><div className="admin-row user admin-head"><span>Nama</span><span>Email</span><span>Status</span><span>Role</span><span /></div>{users.map((user) => <div className="admin-row user" key={user.id}><span><strong>{user.fullName}</strong><small>{user.employeeCode || "Tanpa kode karyawan"}</small></span><span>{user.email}</span><Status value={user.status} /><span>{user.assignments?.map((item) => item.roleName).join(", ") || "Belum ditetapkan"}</span><div className="row-actions"><button disabled={!can("users.reset_password")} onClick={() => { setSelectedUser(user); setDialog("password"); }}>Ubah password</button><button disabled={!can("users.assign_roles")} onClick={() => void openRoleAssignment(user)}>Atur role</button><button disabled={!can("users.update")} onClick={() => void toggleUser(user)}>{user.status === "active" ? "Suspend" : "Aktifkan"}</button></div></div>)}</div>
       </DataPanel>}
       {tab === "roles" && <DataPanel title="Role" count={roles.length} action={can("roles.create") ? () => setDialog("role") : undefined} actionLabel="Tambah role">
         <div className="admin-card-grid">{roles.map((role) => <article key={role.id}><div><span className="admin-code">{role.code}</span>{role.isSystem && <em>System</em>}</div><h3>{role.name}</h3><p>{role.description || "Belum ada deskripsi."}</p><button disabled={!can("roles.assign_permissions")} onClick={() => void openPermissionAssignment(role)}>Atur permission</button></article>)}</div>
@@ -93,6 +93,7 @@ export function AdminConsole({ session, api, notify }: { session: AuthSession; a
     </>}
     {dialog === "outlet" && <CreateOutletDialog api={api} onClose={() => setDialog(null)} onDone={async () => { setDialog(null); notify("Outlet berhasil dibuat."); await load(); }} />}
     {dialog === "user" && <CreateUserDialog api={api} onClose={() => setDialog(null)} onDone={async () => { setDialog(null); notify("User berhasil dibuat."); await load(); }} />}
+    {dialog === "password" && selectedUser && <ResetPasswordDialog api={api} user={selectedUser} onClose={() => setDialog(null)} onDone={async () => { setDialog(null); notify(`Password ${selectedUser.fullName} berhasil diperbarui. Sesi lama tidak dapat diperpanjang.`); }} />}
     {dialog === "role" && <CreateRoleDialog api={api} onClose={() => setDialog(null)} onDone={async () => { setDialog(null); notify("Role berhasil dibuat."); await load(); }} />}
     {dialog === "assign-role" && selectedUser && <AssignRoleDialog api={api} user={selectedUser} roles={roles} outlets={outlets} onClose={() => setDialog(null)} onDone={async () => { setDialog(null); notify("Role user berhasil diperbarui."); await load(); }} />}
     {dialog === "assign-permission" && selectedRole && <AssignPermissionDialog api={api} role={selectedRole} permissions={permissions} onClose={() => setDialog(null)} onDone={async () => { setDialog(null); notify("Permission role berhasil diperbarui."); await load(); }} />}
@@ -129,6 +130,15 @@ function CreateOutletDialog({ api, onClose, onDone }: { api: ApiClient; onClose:
 }
 function CreateUserDialog({ api, onClose, onDone }: { api: ApiClient; onClose: () => void; onDone: () => Promise<void> }) {
   return <Dialog title="Tambah user" subtitle="Buat akun dan password awal." onClose={onClose}><SimpleForm submitLabel="Buat user" onSubmit={async (form) => { await api("/users", { method: "POST", body: JSON.stringify({ fullName: form.get("fullName"), email: form.get("email"), employeeCode: form.get("employeeCode") || undefined, phone: form.get("phone") || undefined, password: form.get("password") }) }); await onDone(); }}><label>Nama lengkap<input name="fullName" required /></label><label>Email<input type="email" name="email" required /></label><label>Kode karyawan<input name="employeeCode" /></label><label>Telepon<input name="phone" /></label><label>Password awal<input type="password" name="password" required minLength={12} placeholder="Huruf besar, kecil, angka & simbol" /></label></SimpleForm></Dialog>;
+}
+function ResetPasswordDialog({ api, user, onClose, onDone }: { api: ApiClient; user: User; onClose: () => void; onDone: () => Promise<void> }) {
+  return <Dialog title={`Ubah password · ${user.fullName}`} subtitle="Password baru mencabut refresh token; access token lama berakhir sesuai TTL." onClose={onClose}><SimpleForm submitLabel="Simpan password baru" onSubmit={async (form) => {
+    const newPassword = String(form.get("newPassword") ?? "");
+    const confirmation = String(form.get("passwordConfirmation") ?? "");
+    if (newPassword !== confirmation) throw new Error("Konfirmasi password tidak sama.");
+    await api(`/users/${user.id}/password`, { method: "PUT", body: JSON.stringify({ newPassword, reason: form.get("reason") || undefined }) });
+    await onDone();
+  }}><label>Password baru<input type="password" name="newPassword" required minLength={12} maxLength={128} autoComplete="new-password" placeholder="Huruf besar, kecil, angka & simbol" /></label><label>Konfirmasi password<input type="password" name="passwordConfirmation" required minLength={12} maxLength={128} autoComplete="new-password" /></label><label>Alasan perubahan (opsional)<textarea name="reason" minLength={3} maxLength={500} rows={3} placeholder="Contoh: user lupa password" /></label></SimpleForm></Dialog>;
 }
 function CreateRoleDialog({ api, onClose, onDone }: { api: ApiClient; onClose: () => void; onDone: () => Promise<void> }) {
   return <Dialog title="Tambah role" subtitle="Definisikan kelompok hak akses." onClose={onClose}><SimpleForm submitLabel="Simpan role" onSubmit={async (form) => { await api("/roles", { method: "POST", body: JSON.stringify({ code: String(form.get("code")).toUpperCase(), name: form.get("name"), description: form.get("description") || undefined }) }); await onDone(); }}><label>Kode<input name="code" required placeholder="MANAGER" /></label><label>Nama role<input name="name" required /></label><label>Deskripsi<textarea name="description" rows={3} /></label></SimpleForm></Dialog>;

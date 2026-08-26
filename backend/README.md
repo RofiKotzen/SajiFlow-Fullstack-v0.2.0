@@ -120,6 +120,7 @@ Bearer ACCESS_TOKEN
 | GET/POST | `/api/v1/users` | `users.read/create` | Daftar/buat user |
 | GET/PATCH | `/api/v1/users/:id` | `users.read/update` | Detail/ubah user |
 | PUT | `/api/v1/users/:id/roles` | `users.assign_roles` | Ganti assignment role user |
+| PUT | `/api/v1/users/:id/password` | `users.reset_password` | Reset password dan cabut seluruh refresh token user |
 | GET/POST | `/api/v1/roles` | `roles.read/create` | Daftar/buat role |
 | GET/PATCH | `/api/v1/roles/:id` | `roles.read/update` | Detail/ubah role |
 | PUT | `/api/v1/roles/:id/permissions` | `roles.assign_permissions` | Ganti permission role |
