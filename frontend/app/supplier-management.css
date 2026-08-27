@@ -1,0 +1,44 @@
+.sm-table {
+  min-width: 980px;
+}
+.sm-catalog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+  color: #65736d;
+  font-size: 13px;
+}
+.sm-full {
+  grid-column: 1/-1;
+}
+.sm-full textarea {
+  display: block;
+  width: 100%;
+  min-height: 78px;
+  margin-top: 6px;
+  border: 1px solid #d8e0dc;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+  font-size: 15px;
+  resize: vertical;
+}
+.sm-catalog-form {
+  border-top: 1px solid var(--line);
+  background: #faf9f5;
+}
+@media (max-width: 760px) {
+  .sm-catalog-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .sm-full {
+    grid-column: 1;
+  }
+  .sm-catalog-head .primary-button {
+    width: 100%;
+  }
+}

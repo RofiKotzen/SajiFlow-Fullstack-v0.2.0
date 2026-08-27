@@ -35,7 +35,6 @@ import {
   stockMovementLines,
   stockMovements,
   storageLocations,
-  suppliers,
   units,
   users,
 } from "../database/schema";
@@ -89,7 +88,7 @@ export class GoodsReceiptsService {
         or(
           ilike(goodsReceipts.receiptNo, search),
           ilike(purchaseOrders.poNo, search),
-          ilike(suppliers.name, search),
+          ilike(purchaseOrders.supplierNameSnapshot, search),
           ilike(goodsReceipts.supplierDeliveryNo, search),
           ilike(goodsReceipts.supplierInvoiceNo, search),
         )!,
@@ -105,7 +104,7 @@ export class GoodsReceiptsService {
         purchaseOrderId: goodsReceipts.purchaseOrderId,
         poNo: purchaseOrders.poNo,
         supplierId: purchaseOrders.supplierId,
-        supplierName: suppliers.name,
+        supplierName: purchaseOrders.supplierNameSnapshot,
         receivedAt: goodsReceipts.receivedAt,
         receivedByName: users.fullName,
         status: goodsReceipts.status,
@@ -136,7 +135,6 @@ export class GoodsReceiptsService {
         purchaseOrders,
         eq(purchaseOrders.id, goodsReceipts.purchaseOrderId),
       )
-      .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
       .innerJoin(users, eq(users.id, goodsReceipts.receivedBy))
       .where(and(...conditions))
       .orderBy(desc(goodsReceipts.receivedAt), desc(goodsReceipts.createdAt));
@@ -179,14 +177,13 @@ export class GoodsReceiptsService {
         outletName: outlets.name,
         poNo: purchaseOrders.poNo,
         supplierId: purchaseOrders.supplierId,
-        supplierName: suppliers.name,
+        supplierName: purchaseOrders.supplierNameSnapshot,
         orderDate: purchaseOrders.orderDate,
         expectedDate: purchaseOrders.expectedDate,
         status: purchaseOrders.status,
       })
       .from(purchaseOrders)
       .innerJoin(outlets, eq(outlets.id, purchaseOrders.outletId))
-      .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
       .where(and(...poConditions))
       .orderBy(asc(purchaseOrders.expectedDate), asc(purchaseOrders.poNo));
 
@@ -197,13 +194,13 @@ export class GoodsReceiptsService {
         id: purchaseOrderItems.id,
         purchaseOrderId: purchaseOrderItems.purchaseOrderId,
         ingredientId: purchaseOrderItems.ingredientId,
-        ingredientSku: ingredients.sku,
-        ingredientName: ingredients.name,
+        ingredientSku: purchaseOrderItems.ingredientSkuSnapshot,
+        ingredientName: purchaseOrderItems.ingredientNameSnapshot,
         isPerishable: ingredients.isPerishable,
         shelfLifeDays: ingredients.shelfLifeDays,
         purchaseUnitId: purchaseOrderItems.purchaseUnitId,
-        purchaseUnitCode: units.code,
-        purchaseUnitName: units.name,
+        purchaseUnitCode: purchaseOrderItems.purchaseUnitCodeSnapshot,
+        purchaseUnitName: purchaseOrderItems.purchaseUnitNameSnapshot,
         quantityOrdered: purchaseOrderItems.quantityOrdered,
         quantityReceived: purchaseOrderItems.quantityReceived,
         conversionToBase: purchaseOrderItems.conversionToBase,
@@ -215,7 +212,6 @@ export class GoodsReceiptsService {
         ingredients,
         eq(ingredients.id, purchaseOrderItems.ingredientId),
       )
-      .innerJoin(units, eq(units.id, purchaseOrderItems.purchaseUnitId))
       .where(
         and(
           eq(purchaseOrderItems.tenantId, actor.tenantId),
@@ -226,7 +222,7 @@ export class GoodsReceiptsService {
           sql`${purchaseOrderItems.quantityReceived} < ${purchaseOrderItems.quantityOrdered}`,
         ),
       )
-      .orderBy(asc(ingredients.name));
+      .orderBy(asc(purchaseOrderItems.ingredientNameSnapshot));
     return {
       storageLocations: locations,
       purchaseOrders: headers.map((header) => ({
@@ -930,8 +926,8 @@ export class GoodsReceiptsService {
         poNo: purchaseOrders.poNo,
         poStatus: purchaseOrders.status,
         supplierId: purchaseOrders.supplierId,
-        supplierCode: suppliers.code,
-        supplierName: suppliers.name,
+        supplierCode: purchaseOrders.supplierCodeSnapshot,
+        supplierName: purchaseOrders.supplierNameSnapshot,
         receivedAt: goodsReceipts.receivedAt,
         receivedBy: goodsReceipts.receivedBy,
         receivedByName: users.fullName,
@@ -948,7 +944,6 @@ export class GoodsReceiptsService {
         purchaseOrders,
         eq(purchaseOrders.id, goodsReceipts.purchaseOrderId),
       )
-      .innerJoin(suppliers, eq(suppliers.id, purchaseOrders.supplierId))
       .innerJoin(users, eq(users.id, goodsReceipts.receivedBy))
       .where(
         and(
@@ -964,12 +959,12 @@ export class GoodsReceiptsService {
         id: goodsReceiptItems.id,
         purchaseOrderItemId: goodsReceiptItems.purchaseOrderItemId,
         ingredientId: goodsReceiptItems.ingredientId,
-        ingredientSku: ingredients.sku,
-        ingredientName: ingredients.name,
+        ingredientSku: purchaseOrderItems.ingredientSkuSnapshot,
+        ingredientName: purchaseOrderItems.ingredientNameSnapshot,
         isPerishable: ingredients.isPerishable,
         purchaseUnitId: goodsReceiptItems.purchaseUnitId,
-        purchaseUnitCode: units.code,
-        purchaseUnitName: units.name,
+        purchaseUnitCode: purchaseOrderItems.purchaseUnitCodeSnapshot,
+        purchaseUnitName: purchaseOrderItems.purchaseUnitNameSnapshot,
         quantityOrdered: purchaseOrderItems.quantityOrdered,
         poQuantityReceived: purchaseOrderItems.quantityReceived,
         quantityReceived: goodsReceiptItems.quantityReceived,
@@ -992,7 +987,6 @@ export class GoodsReceiptsService {
         ingredients,
         eq(ingredients.id, goodsReceiptItems.ingredientId),
       )
-      .innerJoin(units, eq(units.id, goodsReceiptItems.purchaseUnitId))
       .innerJoin(
         storageLocations,
         eq(storageLocations.id, goodsReceiptItems.storageLocationId),
@@ -1003,7 +997,7 @@ export class GoodsReceiptsService {
           eq(goodsReceiptItems.goodsReceiptId, id),
         ),
       )
-      .orderBy(asc(ingredients.name));
+      .orderBy(asc(purchaseOrderItems.ingredientNameSnapshot));
     return {
       ...header,
       items,

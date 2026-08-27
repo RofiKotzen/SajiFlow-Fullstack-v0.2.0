@@ -16,6 +16,7 @@ import { OutletsModule } from "./outlets/outlets.module";
 import { PermissionsModule } from "./permissions/permissions.module";
 import { PurchaseOrdersModule } from "./purchase-orders/purchase-orders.module";
 import { RolesModule } from "./roles/roles.module";
+import { SuppliersModule } from "./suppliers/suppliers.module";
 import { TenantsModule } from "./tenants/tenants.module";
 import { UsersModule } from "./users/users.module";
 import { UnitsModule } from "./units/units.module";
@@ -40,6 +41,7 @@ import { UnitsModule } from "./units/units.module";
     UsersModule,
     UnitsModule,
     RolesModule,
+    SuppliersModule,
     PermissionsModule,
     PurchaseOrdersModule,
   ],

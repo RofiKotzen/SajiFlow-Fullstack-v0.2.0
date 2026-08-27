@@ -417,7 +417,12 @@ export const suppliers = pgTable(
     deletedBy: uuid("deleted_by"),
   },
   (table) => [
+    uniqueIndex("uq_suppliers_tenant_code_permanent").on(
+      table.tenantId,
+      table.code,
+    ),
     index("ix_suppliers_tenant_id").on(table.tenantId),
+    index("ix_suppliers_tenant_active").on(table.tenantId, table.isActive),
     index("ix_suppliers_created_by").on(table.createdBy),
   ],
 );
@@ -449,7 +454,10 @@ export const supplierIngredients = pgTable(
       .notNull()
       .default(1),
     isPreferred: boolean("is_preferred").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
     ...auditColumns,
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
   },
   (table) => [
     uniqueIndex("uq_supplier_catalog").on(
@@ -458,6 +466,20 @@ export const supplierIngredients = pgTable(
       table.purchaseUnitId,
     ),
     index("ix_supplier_ingredients_tenant_id").on(table.tenantId),
+    index("ix_supplier_ingredients_supplier_active").on(
+      table.tenantId,
+      table.supplierId,
+      table.isActive,
+    ),
+    index("ix_supplier_ingredients_ingredient").on(
+      table.tenantId,
+      table.ingredientId,
+    ),
+    uniqueIndex("uq_supplier_catalog_preferred_active")
+      .on(table.tenantId, table.ingredientId, table.purchaseUnitId)
+      .where(
+        sql`${table.isPreferred} = true and ${table.isActive} = true and ${table.deletedAt} is null`,
+      ),
   ],
 );
 
@@ -562,6 +584,20 @@ export const purchaseOrders = pgTable(
     outletId: uuid("outlet_id").notNull(),
     poNo: varchar("po_no", { length: 50 }).notNull(),
     supplierId: uuid("supplier_id").notNull(),
+    supplierCodeSnapshot: varchar("supplier_code_snapshot", {
+      length: 40,
+    }).notNull(),
+    supplierNameSnapshot: varchar("supplier_name_snapshot", {
+      length: 150,
+    }).notNull(),
+    supplierContactNameSnapshot: varchar("supplier_contact_name_snapshot", {
+      length: 120,
+    }),
+    supplierPhoneSnapshot: varchar("supplier_phone_snapshot", { length: 30 }),
+    supplierEmailSnapshot: text("supplier_email_snapshot"),
+    supplierAddressSnapshot: text("supplier_address_snapshot"),
+    paymentTermDaysSnapshot: integer("payment_term_days_snapshot"),
+    leadTimeDaysSnapshot: integer("lead_time_days_snapshot"),
     purchaseRequestId: uuid("purchase_request_id"),
     orderDate: date("order_date").notNull(),
     expectedDate: date("expected_date"),
@@ -616,15 +652,34 @@ export const purchaseOrderItems = pgTable(
     tenantId: uuid("tenant_id").notNull(),
     purchaseOrderId: uuid("purchase_order_id").notNull(),
     ingredientId: uuid("ingredient_id").notNull(),
+    ingredientSkuSnapshot: varchar("ingredient_sku_snapshot", {
+      length: 50,
+    }).notNull(),
+    ingredientNameSnapshot: varchar("ingredient_name_snapshot", {
+      length: 150,
+    }).notNull(),
+    supplierCatalogId: uuid("supplier_catalog_id"),
+    supplierSkuSnapshot: varchar("supplier_sku_snapshot", { length: 80 }),
     quantityOrdered: numeric("quantity_ordered", {
       precision: 18,
       scale: 3,
       mode: "number",
     }).notNull(),
     purchaseUnitId: uuid("purchase_unit_id").notNull(),
+    purchaseUnitCodeSnapshot: varchar("purchase_unit_code_snapshot", {
+      length: 20,
+    }).notNull(),
+    purchaseUnitNameSnapshot: varchar("purchase_unit_name_snapshot", {
+      length: 80,
+    }).notNull(),
     conversionToBase: numeric("conversion_to_base", {
       precision: 18,
       scale: 6,
+      mode: "number",
+    }).notNull(),
+    minimumOrderQtySnapshot: numeric("minimum_order_qty_snapshot", {
+      precision: 18,
+      scale: 3,
       mode: "number",
     }).notNull(),
     unitPrice: numeric("unit_price", {

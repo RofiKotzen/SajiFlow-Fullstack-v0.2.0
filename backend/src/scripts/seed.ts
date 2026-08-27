@@ -92,6 +92,11 @@ const permissionSeed = [
   ["ingredients.read", "ingredients", "Melihat master bahan"],
   ["ingredients.create", "ingredients", "Membuat bahan"],
   ["ingredients.update", "ingredients", "Mengubah bahan dan pengaturan outlet"],
+  ["suppliers.read", "suppliers", "Melihat master supplier"],
+  ["suppliers.create", "suppliers", "Membuat supplier"],
+  ["suppliers.update", "suppliers", "Mengubah atau mengarsipkan supplier"],
+  ["suppliers.catalog.read", "suppliers", "Melihat katalog bahan supplier"],
+  ["suppliers.catalog.manage", "suppliers", "Mengelola katalog bahan supplier"],
 ] as const;
 
 async function main(): Promise<void> {
