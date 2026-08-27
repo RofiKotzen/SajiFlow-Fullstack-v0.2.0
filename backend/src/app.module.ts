@@ -9,6 +9,8 @@ import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { validateEnv } from "./config/env.validation";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
+import { InventoryModule } from "./inventory/inventory.module";
+import { GoodsReceiptsModule } from "./goods-receipts/goods-receipts.module";
 import { OutletsModule } from "./outlets/outlets.module";
 import { PermissionsModule } from "./permissions/permissions.module";
 import { PurchaseOrdersModule } from "./purchase-orders/purchase-orders.module";
@@ -27,7 +29,9 @@ import { UsersModule } from "./users/users.module";
     AuditModule,
     AuthModule,
     BudgetsModule,
+    GoodsReceiptsModule,
     HealthModule,
+    InventoryModule,
     TenantsModule,
     OutletsModule,
     UsersModule,

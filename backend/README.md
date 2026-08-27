@@ -1,6 +1,6 @@
-# Saji Flow Backend v0.4.0
+# Saji Flow Backend v0.5.0
 
-Backend Saji Flow untuk PostgreSQL: autentikasi dan organisasi, Budget Planning, serta Purchase Order.
+Backend Saji Flow untuk PostgreSQL: autentikasi dan organisasi, Budget Planning, Purchase Order, serta Goods Receipt.
 
 ## Cakupan
 
@@ -18,6 +18,7 @@ Backend Saji Flow untuk PostgreSQL: autentikasi dan organisasi, Budget Planning,
 - Seed tenant, outlet, permission, role Super Admin, dan admin pertama.
 - Budget Planning multi-outlet dengan alokasi, realisasi, approval workflow, audit, dan histori status.
 - Purchase Order multi-outlet dengan katalog supplier, snapshot harga/konversi, kalkulasi server, workflow, dan audit trail.
+- Goods Receipt dengan penerimaan parsial, batch/expiry, posting stok atomik, reversal, update status PO, RBAC, dan audit trail.
 
 ## Persyaratan
 
@@ -140,6 +141,11 @@ Bearer ACCESS_TOKEN
 | POST      | `/api/v1/purchase-orders/:id/send` | `purchase_orders.send`  | Tandai PO telah dikirim ke supplier                 |
 | POST      | `/api/v1/purchase-orders/:id/cancel` | `purchase_orders.cancel` | Batalkan PO dengan alasan wajib                 |
 | POST      | `/api/v1/purchase-orders/:id/close` | `purchase_orders.close` | Tutup PO yang sudah diterima                      |
+| GET/POST  | `/api/v1/goods-receipts` | `goods_receipts.read/create` | Daftar/buat draft penerimaan |
+| GET       | `/api/v1/goods-receipts/lookups` | `goods_receipts.read` | PO siap diterima dan lokasi stok |
+| GET/PATCH | `/api/v1/goods-receipts/:id` | `goods_receipts.read/update` | Detail/ubah draft penerimaan |
+| POST      | `/api/v1/goods-receipts/:id/post` | `goods_receipts.post` | Posting batch dan ledger stok |
+| POST      | `/api/v1/goods-receipts/:id/void` | `goods_receipts.void` | Void melalui reversal stok |
 
 ## Aturan penting
 
@@ -159,12 +165,16 @@ Bearer ACCESS_TOKEN
 - Harga dan konversi satuan disimpan sebagai snapshot pada item PO. Draft dapat diubah; PO yang sudah disetujui tidak dapat diedit.
 - Alur PO adalah `draft → approved → sent → partially_received/received → closed`. Status penerimaan hanya akan diubah oleh modul Goods Receipt, bukan secara manual dari Purchase Order.
 - PO `draft`, `approved`, atau `sent` dapat dibatalkan bila belum menerima barang; alasan pembatalan wajib diisi.
+- Goods Receipt hanya menerima PO `sent/partially_received`; total diterima dan ditolak tidak boleh melebihi sisa PO.
+- Posting GR bersifat transaksional: batch, ledger, kuantitas PO, status PO, dan audit dicatat bersama.
+- Stock ledger append-only. Koreksi GR posted dilakukan dengan reversal; void ditolak jika stok batch telah terpakai.
 - Untuk lokal, koneksi dapat memakai user `postgres`. Sebelum production, gunakan database role khusus aplikasi dan secret manager.
 
 ## Struktur migration
 
 - `drizzle/0001_initial_schema.sql`: schema database Saji Flow v1.1 (69 tabel).
 - `drizzle/0002_core_auth.sql`: `user_credentials`, `refresh_tokens`, indeks, trigger, dan RLS.
+- `drizzle/0003_goods_receipt_extensions.sql`: invoice supplier, kuantitas ditolak, dan validasinya.
 - `schema_migrations`: catatan migration yang sudah diterapkan.
 
 Migration runner tidak mengulang `0001` bila tabel `public.tenants` sudah ada. Ini dibuat khusus agar aman melanjutkan database lokal yang sudah kamu siapkan.

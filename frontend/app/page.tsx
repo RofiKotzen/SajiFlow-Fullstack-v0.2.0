@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { AdminConsole, SessionControls } from "./admin-console";
 import { ConnectedBudgetPlanning } from "./budget-planning";
+import { ConnectedGoodsReceipts } from "./goods-receipts";
+import { ConnectedInventoryOverview } from "./inventory-overview";
 import { ConnectedPurchaseOrders } from "./purchase-orders";
 import { AuthGate, type ApiClient, type AuthSession } from "./sajiflow-api";
 
@@ -44,12 +46,6 @@ const supplierList = [
   { name: "CV Bumi Rempah", code: "SUP-003", category: "Bumbu & Bahan Kering", orders: 28, rating: 4.8, delivery: "96%", status: "Aktif" },
   { name: "Dairyland Cianjur", code: "SUP-004", category: "Produk Susu", orders: 19, rating: 4.5, delivery: "91%", status: "Evaluasi" },
   { name: "Kemasan Prima", code: "SUP-005", category: "Kemasan", orders: 24, rating: 4.6, delivery: "93%", status: "Aktif" },
-];
-
-const initialReceipts = [
-  { id: "GR-240824-009", po: "PO-220824-016", supplier: "Sumber Protein Sejahtera", schedule: "Hari ini, 10:00", items: 8, status: "Dalam Perjalanan" },
-  { id: "GR-240824-008", po: "PO-230824-017", supplier: "CV Bumi Rempah", schedule: "Hari ini, 14:00", items: 12, status: "Dijadwalkan" },
-  { id: "GR-230824-007", po: "PO-210824-015", supplier: "Dairyland Cianjur", schedule: "Kemarin, 09:45", items: 5, status: "Diterima" },
 ];
 
 const menuRecipes = [
@@ -112,7 +108,6 @@ const salesTransactions = [
 type DetailSelection =
   | { kind: "order"; data: (typeof purchaseOrders)[number] }
   | { kind: "supplier"; data: (typeof supplierList)[number] }
-  | { kind: "receipt"; data: (typeof initialReceipts)[number] }
   | { kind: "recipe"; data: (typeof menuRecipes)[number] }
   | { kind: "kds"; data: (typeof kitchenOrdersSeed)[number] }
   | { kind: "inventory"; data: (typeof inventoryItems)[number] }
@@ -133,7 +128,6 @@ function OperationWorkspace({ session, api, logout }: { session: AuthSession; ap
   const [view, setView] = useState<View>("dashboard");
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState("");
-  const [receipts, setReceipts] = useState(initialReceipts);
   const [detail, setDetail] = useState<DetailSelection | null>(null);
   const filteredSuppliers = useMemo(() => supplierList.filter((supplier) => `${supplier.name} ${supplier.category}`.toLowerCase().includes(query.toLowerCase())), [query]);
   const nav: { id: View; label: string; icon: IconName }[] = [
@@ -162,15 +156,15 @@ function OperationWorkspace({ session, api, logout }: { session: AuthSession; ap
     </aside>
     <section className="workspace">
       <header className="topbar"><div className="mobile-brand"><div className="brand-mark">K</div><strong>Kotzen Operation</strong></div><div className="top-actions"><SessionControls api={api} logout={logout} /><button className="icon-button" aria-label="Notifikasi"><Icon name="bell"/><span className="notification-dot" /></button><span className="date-chip">24 Agustus 2026</span></div></header>
-      <div className="content"><div className="page-heading"><div><p className="breadcrumb">SAJI FLOW / {view === "recipes" ? "FOOD COST" : view === "budgets" ? "BUDGET CONTROL" : view === "kds" ? "KITCHEN OPERATIONS" : view === "inventory" ? "INVENTORY CONTROL" : view === "pos" ? "POINT OF SALE" : view === "settings" ? "WORKSPACE ADMIN" : "PURCHASING"}</p><h1>{titles[view].title}</h1><p>{titles[view].subtitle}</p></div>{view === "recipes" ? <button className="primary-button" onClick={() => notify("Form resep baru siap digunakan pada tahap pengembangan berikutnya.")}><Icon name="plus"/> Tambah Resep</button> : view === "kds" ? <button className="secondary-button" onClick={() => notify("Mode layar dapur siap diaktifkan.")}><Icon name="kitchen"/> Mode Layar Dapur</button> : view === "inventory" ? <button className="primary-button" onClick={() => notify("Form stock adjustment siap digunakan.")}><Icon name="plus"/> Stock Adjustment</button> : view === "pos" ? <button className="secondary-button" onClick={() => notify("Ringkasan penutupan shift kasir siap ditinjau.")}><Icon name="check"/> Tutup Shift</button> : null}</div>
+      <div className="content"><div className="page-heading"><div><p className="breadcrumb">SAJI FLOW / {view === "recipes" ? "FOOD COST" : view === "budgets" ? "BUDGET CONTROL" : view === "kds" ? "KITCHEN OPERATIONS" : view === "inventory" ? "INVENTORY CONTROL" : view === "pos" ? "POINT OF SALE" : view === "settings" ? "WORKSPACE ADMIN" : "PURCHASING"}</p><h1>{titles[view].title}</h1><p>{titles[view].subtitle}</p></div>{view === "recipes" ? <button className="primary-button" onClick={() => notify("Form resep baru siap digunakan pada tahap pengembangan berikutnya.")}><Icon name="plus"/> Tambah Resep</button> : view === "kds" ? <button className="secondary-button" onClick={() => notify("Mode layar dapur siap diaktifkan.")}><Icon name="kitchen"/> Mode Layar Dapur</button> : view === "pos" ? <button className="secondary-button" onClick={() => notify("Ringkasan penutupan shift kasir siap ditinjau.")}><Icon name="check"/> Tutup Shift</button> : null}</div>
         {view === "dashboard" && <Dashboard setView={setView} onSelect={(data) => setDetail({ kind: "order", data })} />}
         {view === "orders" && <ConnectedPurchaseOrders session={session} api={api} onNotify={notify} />}
         {view === "suppliers" && <Suppliers suppliers={filteredSuppliers} query={query} setQuery={setQuery} onSelect={(data) => setDetail({ kind: "supplier", data })} />}
-        {view === "receipts" && <Receipts receipts={receipts} onSelect={(data) => setDetail({ kind: "receipt", data })} onReceive={(id) => { setReceipts((items) => items.map((item) => item.id === id ? { ...item, status: "Diterima" } : item)); notify(`${id} berhasil dikonfirmasi diterima.`); }} />}
+        {view === "receipts" && <ConnectedGoodsReceipts session={session} api={api} onNotify={notify} />}
         {view === "recipes" && <RecipeFoodCost query={query} setQuery={setQuery} onSelect={(data) => setDetail({ kind: "recipe", data })} />}
         {view === "budgets" && <ConnectedBudgetPlanning session={session} api={api} onNotify={notify} />}
         {view === "kds" && <KitchenDisplay onSelect={(data) => setDetail({ kind: "kds", data })} onNotify={notify} />}
-        {view === "inventory" && <InventoryControl onSelect={(data) => setDetail({ kind: "inventory", data })} onNotify={notify} />}
+        {view === "inventory" && <ConnectedInventoryOverview session={session} api={api} />}
         {view === "pos" && <PosSales onSelect={(data) => setDetail({ kind: "sale", data })} onNotify={notify} />}
         {view === "settings" && <AdminConsole session={session} api={api} notify={notify} />}
       </div>
@@ -201,10 +195,6 @@ function SearchBox({ value, onChange, placeholder }: { value: string; onChange: 
 
 function Suppliers({ suppliers, query, setQuery, onSelect }: { suppliers: typeof supplierList; query: string; setQuery: (value: string) => void; onSelect: (supplier: (typeof supplierList)[number]) => void }) {
   return <><div className="supplier-summary"><article><span>Total supplier</span><strong>21</strong><small>18 aktif • 3 evaluasi</small></article><article><span>Ketepatan pengiriman</span><strong>94,4%</strong><small>+2,1% bulan ini</small></article><article><span>Rata-rata rating</span><strong>4,7</strong><small>dari 5,0</small></article></div><section className="panel data-panel"><div className="data-toolbar"><SearchBox value={query} onChange={setQuery} placeholder="Cari nama atau kategori supplier..."/><button className="secondary-button"><Icon name="plus"/> Tambah Supplier</button></div><div className="supplier-list">{suppliers.map((supplier) => <article className="supplier-row clickable-row" key={supplier.code} onClick={() => onSelect(supplier)}><div className="supplier-avatar">{supplier.name.split(" ").slice(-2).map(x=>x[0]).join("")}</div><div className="supplier-main"><strong>{supplier.name}</strong><span>{supplier.code} • {supplier.category}</span></div><div><span className="cell-label">Total PO</span><strong>{supplier.orders}</strong></div><div><span className="cell-label">Rating</span><strong className="rating">★ {supplier.rating}</strong></div><div><span className="cell-label">Tepat waktu</span><strong>{supplier.delivery}</strong></div><Badge status={supplier.status}/><button className="row-action" aria-label={`Buka detail ${supplier.name}`} onClick={(event) => { event.stopPropagation(); onSelect(supplier); }}><Icon name="arrow" size={16}/></button></article>)}</div></section></>;
-}
-
-function Receipts({ receipts, onReceive, onSelect }: { receipts: typeof initialReceipts; onReceive: (id: string) => void; onSelect: (receipt: (typeof initialReceipts)[number]) => void }) {
-  return <div className="receipt-grid"><section className="panel data-panel"><div className="panel-heading receipt-heading"><div><h2>Jadwal Penerimaan</h2><p>Barang yang akan dan sudah tiba</p></div><span className="date-chip">3 transaksi</span></div><div className="receipt-list">{receipts.map((item) => <article key={item.id} className="clickable-row" onClick={() => onSelect(item)}><div className="receipt-icon"><Icon name="truck"/></div><div className="receipt-main"><div><strong>{item.supplier}</strong><Badge status={item.status}/></div><span>{item.id} • {item.po}</span><small>{item.items} item • {item.schedule}</small></div><button className="detail-text-button" onClick={(event) => { event.stopPropagation(); onSelect(item); }}>Lihat detail</button>{item.status !== "Diterima" ? <button className="secondary-button" onClick={(event) => { event.stopPropagation(); onReceive(item.id); }}><Icon name="check"/> Konfirmasi</button> : <div className="received-check"><Icon name="check"/></div>}</article>)}</div></section><aside className="panel receive-guide"><span className="guide-icon"><Icon name="box" size={26}/></span><h2>Checklist penerimaan</h2><p>Pastikan tim gudang memeriksa tiga poin utama sebelum menyimpan barang.</p><ol><li><span>1</span><div><strong>Kuantitas</strong><small>Cocokkan jumlah dengan PO</small></div></li><li><span>2</span><div><strong>Kualitas</strong><small>Periksa kondisi dan kesegaran</small></div></li><li><span>3</span><div><strong>Dokumen</strong><small>Foto surat jalan dan invoice</small></div></li></ol></aside></div>;
 }
 
 function PosSales({ onSelect, onNotify }: { onSelect: (transaction: (typeof salesTransactions)[number]) => void; onNotify: (message: string) => void }) {
@@ -243,6 +233,8 @@ function PosSales({ onSelect, onNotify }: { onSelect: (transaction: (typeof sale
   </>;
 }
 
+// Legacy visual reference retained until Stock Transfer and Waste become connected modules.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function InventoryControl({ onSelect, onNotify }: { onSelect: (item: (typeof inventoryItems)[number]) => void; onNotify: (message: string) => void }) {
   const [mode, setMode] = useState<"overview" | "movements" | "transfers" | "waste">("overview");
   const [query, setQuery] = useState("");
@@ -385,7 +377,6 @@ function DetailDrawer({ detail, onClose, onAction }: { detail: DetailSelection; 
     <aside className="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="detail-title" onMouseDown={(event) => event.stopPropagation()}>
       {detail.kind === "order" && <OrderDetail order={detail.data} onClose={onClose} onAction={onAction} />}
       {detail.kind === "supplier" && <SupplierDetail supplier={detail.data} onClose={onClose} />}
-      {detail.kind === "receipt" && <ReceiptDetail receipt={detail.data} onClose={onClose} onAction={onAction} />}
       {detail.kind === "recipe" && <RecipeDetail recipe={detail.data} onClose={onClose} onAction={onAction} />}
       {detail.kind === "kds" && <KdsOrderDetail order={detail.data} onClose={onClose} onAction={onAction} />}
       {detail.kind === "inventory" && <InventoryDetail item={detail.data} onClose={onClose} onAction={onAction} />}
@@ -417,17 +408,6 @@ function SupplierDetail({ supplier, onClose }: { supplier: (typeof supplierList)
     <section className="drawer-section"><h3>Informasi Pembayaran</h3><div className="detail-info-grid"><div><span>Termin</span><strong>14 hari</strong></div><div><span>Metode</span><strong>Transfer Bank</strong></div><div><span>Bank</span><strong>Bank Central Asia</strong></div><div><span>Status Pajak</span><strong>PKP • NPWP terverifikasi</strong></div></div></section>
     <section className="drawer-section"><div className="section-title-row"><h3>Purchase Order Terakhir</h3><span>{recent.length || 1} transaksi</span></div><div className="mini-order-list">{(recent.length ? recent : purchaseOrders.slice(0,1)).map((order) => <div key={order.id}><div><strong>{order.id}</strong><span>{order.date} • {order.category}</span></div><b>{rupiah(order.value)}</b><Badge status={order.status}/></div>)}</div></section>
   </div><div className="drawer-footer"><button className="ghost-button" onClick={onClose}>Tutup</button><button className="primary-button">Edit Data Supplier</button></div></>;
-}
-
-function ReceiptDetail({ receipt, onClose, onAction }: { receipt: (typeof initialReceipts)[number]; onClose: () => void; onAction: (message: string) => void }) {
-  const relatedOrder = purchaseOrders.find((order) => order.id === receipt.po) ?? purchaseOrders[0];
-  const items = (orderItems[receipt.po] ?? orderItems[purchaseOrders[0].id]).slice(0, 4);
-  return <><DrawerHeading eyebrow="GOODS RECEIPT" title={receipt.id} subtitle={`Referensi ${receipt.po} • ${receipt.schedule}`} status={receipt.status} onClose={onClose}/><div className="drawer-scroll">
-    <section className="drawer-section"><h3>Informasi Penerimaan</h3><div className="detail-info-grid"><div><span>Supplier</span><strong>{receipt.supplier}</strong></div><div><span>Jumlah item</span><strong>{receipt.items} item</strong></div><div><span>Lokasi</span><strong>Gudang Utama</strong></div><div><span>Petugas</span><strong>Fajar • Storekeeper</strong></div><div><span>Surat Jalan</span><strong>SJ-0824-0198</strong></div><div><span>Nilai PO</span><strong>{rupiah(relatedOrder.value)}</strong></div></div></section>
-    <section className="drawer-section"><div className="section-title-row"><h3>Hasil Pemeriksaan</h3><span>{items.length} dari {receipt.items} ditampilkan</span></div><div className="inspection-list">{items.map((item, index) => <div key={item.name}><span className="inspection-check"><Icon name="check" size={13}/></span><div><strong>{item.name}</strong><small>Dipesan {item.qty} • Diterima {item.qty}</small></div><Badge status={index === 1 ? "Perlu Dicek" : "Sesuai"}/></div>)}</div></section>
-    <section className="drawer-section"><h3>Checklist Kualitas</h3><div className="quality-grid"><div><Icon name="check"/><span>Kuantitas sesuai</span></div><div><Icon name="check"/><span>Kemasan baik</span></div><div><Icon name="check"/><span>Suhu sesuai</span></div><div><Icon name="check"/><span>Dokumen lengkap</span></div></div></section>
-    <section className="drawer-section"><h3>Catatan Petugas</h3><p className="detail-note">Barang diterima dalam kondisi baik. Satu item perlu pengecekan ulang sebelum dipindahkan ke area penyimpanan.</p></section>
-  </div><div className="drawer-footer"><button className="ghost-button" onClick={onClose}>Tutup</button>{receipt.status !== "Diterima" && <button className="primary-button" onClick={() => onAction(`${receipt.id} berhasil dikonfirmasi diterima.`)}><Icon name="check"/> Konfirmasi Diterima</button>}</div></>;
 }
 
 function RecipeDetail({ recipe, onClose, onAction }: { recipe: (typeof menuRecipes)[number]; onClose: () => void; onAction: (message: string) => void }) {

@@ -69,6 +69,31 @@ export const purchaseOrderStatus = pgEnum("purchase_order_status", [
   "closed",
   "cancelled",
 ]);
+export const goodsReceiptStatus = pgEnum("goods_receipt_status", [
+  "draft",
+  "posted",
+  "void",
+]);
+export const storageLocationType = pgEnum("storage_location_type", [
+  "storage",
+  "kitchen",
+  "bar",
+  "chiller",
+  "freezer",
+]);
+export const stockMovementType = pgEnum("stock_movement_type", [
+  "receipt",
+  "sale_consumption",
+  "transfer_out",
+  "transfer_in",
+  "waste",
+  "opname_adjustment",
+  "reversal",
+]);
+export const stockMovementStatus = pgEnum("stock_movement_status", [
+  "posted",
+  "reversed",
+]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -329,6 +354,46 @@ export const ingredients = pgTable(
       .where(sql`${table.deletedAt} is null`),
     index("ix_ingredients_tenant_id").on(table.tenantId),
     index("ix_ingredients_category_id").on(table.categoryId),
+  ],
+);
+
+export const ingredientOutletSettings = pgTable(
+  "ingredient_outlet_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    minimumStock: numeric("minimum_stock", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    reorderPoint: numeric("reorder_point", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    parStock: numeric("par_stock", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    defaultStorageLocationId: uuid("default_storage_location_id"),
+    isAvailable: boolean("is_available").notNull().default(true),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_ing_outlet").on(table.outletId, table.ingredientId),
+    index("ix_ingredient_outlet_settings_tenant_id").on(table.tenantId),
+    index("ix_ingredient_outlet_settings_outlet_id").on(table.outletId),
+    index("ix_ingredient_outlet_settings_ingredient_id").on(table.ingredientId),
   ],
 );
 
@@ -601,5 +666,203 @@ export const purchaseOrderItems = pgTable(
       table.purchaseOrderId,
     ),
     index("ix_purchase_order_items_ingredient_id").on(table.ingredientId),
+  ],
+);
+
+export const goodsReceipts = pgTable(
+  "goods_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    receiptNo: varchar("receipt_no", { length: 50 }).notNull(),
+    purchaseOrderId: uuid("purchase_order_id").notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+    receivedBy: uuid("received_by").notNull(),
+    status: goodsReceiptStatus("status").notNull().default("draft"),
+    supplierDeliveryNo: varchar("supplier_delivery_no", { length: 80 }),
+    supplierInvoiceNo: varchar("supplier_invoice_no", { length: 80 }),
+    notes: text("notes"),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_gr_no").on(table.outletId, table.receiptNo),
+    index("ix_goods_receipts_tenant_id").on(table.tenantId),
+    index("ix_goods_receipts_outlet_id").on(table.outletId),
+    index("ix_goods_receipts_purchase_order_id").on(table.purchaseOrderId),
+  ],
+);
+
+export const goodsReceiptItems = pgTable(
+  "goods_receipt_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    goodsReceiptId: uuid("goods_receipt_id").notNull(),
+    purchaseOrderItemId: uuid("purchase_order_item_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    quantityReceived: numeric("quantity_received", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
+    quantityRejected: numeric("quantity_rejected", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    rejectionReason: varchar("rejection_reason", { length: 500 }),
+    purchaseUnitId: uuid("purchase_unit_id").notNull(),
+    baseQuantity: numeric("base_quantity", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
+    unitCostBase: numeric("unit_cost_base", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    batchNo: varchar("batch_no", { length: 80 }),
+    expiryDate: date("expiry_date"),
+    storageLocationId: uuid("storage_location_id").notNull(),
+    ...auditColumns,
+  },
+  (table) => [
+    index("ix_goods_receipt_items_tenant_id").on(table.tenantId),
+    index("ix_goods_receipt_items_goods_receipt_id").on(table.goodsReceiptId),
+    index("ix_goods_receipt_items_purchase_order_item_id").on(
+      table.purchaseOrderItemId,
+    ),
+  ],
+);
+
+export const storageLocations = pgTable(
+  "storage_locations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    code: varchar("code", { length: 40 }).notNull(),
+    name: varchar("name", { length: 120 }).notNull(),
+    locationType: storageLocationType("location_type")
+      .notNull()
+      .default("storage"),
+    allowNegativeStock: boolean("allow_negative_stock")
+      .notNull()
+      .default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    ...auditColumns,
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
+  },
+  (table) => [
+    uniqueIndex("uq_storage_location_code")
+      .on(table.outletId, table.code)
+      .where(sql`${table.deletedAt} IS NULL`),
+    index("ix_storage_locations_tenant_id").on(table.tenantId),
+    index("ix_storage_locations_outlet_id").on(table.outletId),
+  ],
+);
+
+export const stockBatches = pgTable(
+  "stock_batches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    storageLocationId: uuid("storage_location_id").notNull(),
+    batchNo: varchar("batch_no", { length: 80 }),
+    receivedDate: date("received_date").notNull(),
+    expiryDate: date("expiry_date"),
+    unitCost: numeric("unit_cost", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    quantityOnHand: numeric("quantity_on_hand", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    sourceReceiptItemId: uuid("source_receipt_item_id"),
+    ...auditColumns,
+  },
+  (table) => [
+    index("ix_stock_batches_tenant_id").on(table.tenantId),
+    index("ix_stock_batches_outlet_id").on(table.outletId),
+    index("ix_stock_batches_source_receipt_item_id").on(
+      table.sourceReceiptItemId,
+    ),
+  ],
+);
+
+export const stockMovements = pgTable(
+  "stock_movements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    movementNo: varchar("movement_no", { length: 50 }).notNull(),
+    movementType: stockMovementType("movement_type").notNull(),
+    movementAt: timestamp("movement_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    businessDate: date("business_date").notNull(),
+    referenceType: varchar("reference_type", { length: 60 }),
+    referenceId: uuid("reference_id"),
+    status: stockMovementStatus("status").notNull().default("posted"),
+    reversalOfId: uuid("reversal_of_id"),
+    reason: text("reason"),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_stock_movement_no").on(table.outletId, table.movementNo),
+    index("ix_stock_movements_tenant_id").on(table.tenantId),
+    index("ix_stock_movements_outlet_id").on(table.outletId),
+  ],
+);
+
+export const stockMovementLines = pgTable(
+  "stock_movement_lines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    stockMovementId: uuid("stock_movement_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    storageLocationId: uuid("storage_location_id").notNull(),
+    stockBatchId: uuid("stock_batch_id"),
+    quantityDelta: numeric("quantity_delta", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
+    unitCost: numeric("unit_cost", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    valueDelta: numeric("value_delta", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    balanceAfter: numeric("balance_after", {
+      precision: 18,
+      scale: 3,
+      mode: "number",
+    }),
+    ...auditColumns,
+  },
+  (table) => [
+    index("ix_stock_movement_lines_tenant_id").on(table.tenantId),
+    index("ix_stock_movement_lines_stock_movement_id").on(
+      table.stockMovementId,
+    ),
   ],
 );

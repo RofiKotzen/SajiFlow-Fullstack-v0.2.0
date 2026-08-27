@@ -8,11 +8,13 @@ import {
   outlets,
   permissions,
   ingredientCategories,
+  ingredientOutletSettings,
   ingredients,
   rolePermissions,
   roles,
   supplierIngredients,
   suppliers,
+  storageLocations,
   tenants,
   units,
   userCredentials,
@@ -70,6 +72,20 @@ const permissionSeed = [
     "purchase_orders",
     "Menutup purchase order yang telah diterima",
   ],
+  ["goods_receipts.read", "goods_receipts", "Melihat penerimaan barang"],
+  ["goods_receipts.create", "goods_receipts", "Membuat Goods Receipt draft"],
+  ["goods_receipts.update", "goods_receipts", "Mengubah Goods Receipt draft"],
+  [
+    "goods_receipts.post",
+    "goods_receipts",
+    "Memposting penerimaan ke batch dan ledger stok",
+  ],
+  [
+    "goods_receipts.void",
+    "goods_receipts",
+    "Membatalkan penerimaan melalui reversal stok",
+  ],
+  ["inventory.read", "inventory", "Melihat saldo, batch, dan ledger stok"],
 ] as const;
 
 async function main(): Promise<void> {
@@ -202,6 +218,37 @@ async function main(): Promise<void> {
       (process.env.SEED_SAMPLE_DATA === undefined &&
         process.env.NODE_ENV !== "production");
     if (shouldSeedSamples) {
+      const locationSpecs = [
+        { code: "MAIN-WH", name: "Gudang Utama", type: "storage" },
+        { code: "CHILLER", name: "Chiller Utama", type: "chiller" },
+        { code: "FREEZER", name: "Freezer Utama", type: "freezer" },
+      ] as const;
+      for (const spec of locationSpecs) {
+        const [existingLocation] = await db
+          .select({ id: storageLocations.id })
+          .from(storageLocations)
+          .where(
+            and(
+              eq(storageLocations.tenantId, tenant.id),
+              eq(storageLocations.outletId, outlet.id),
+              eq(storageLocations.code, spec.code),
+              isNull(storageLocations.deletedAt),
+            ),
+          )
+          .limit(1);
+        if (!existingLocation) {
+          await db.insert(storageLocations).values({
+            tenantId: tenant.id,
+            outletId: outlet.id,
+            code: spec.code,
+            name: spec.name,
+            locationType: spec.type,
+            createdBy: admin.id,
+            updatedBy: admin.id,
+          });
+        }
+      }
+
       const unitSpecs = [
         { code: "KG", name: "Kilogram", dimension: "mass", decimalScale: 3 },
         { code: "L", name: "Liter", dimension: "volume", decimalScale: 3 },
@@ -379,6 +426,56 @@ async function main(): Promise<void> {
         ingredientMap.set(spec.sku, ingredient);
       }
 
+      const [defaultStorageLocation] = await db
+        .select({ id: storageLocations.id })
+        .from(storageLocations)
+        .where(
+          and(
+            eq(storageLocations.tenantId, tenant.id),
+            eq(storageLocations.outletId, outlet.id),
+            eq(storageLocations.code, "MAIN-WH"),
+            isNull(storageLocations.deletedAt),
+          ),
+        )
+        .limit(1);
+      const stockSettings = [
+        ["ING-AVOCADO", 5, 8, 15],
+        ["ING-ROMAINE", 4, 7, 12],
+        ["ING-BEEF", 6, 10, 18],
+        ["ING-CHICKEN", 10, 15, 30],
+        ["ING-PASTA", 5, 8, 20],
+        ["ING-CREAM", 6, 10, 20],
+        ["ING-MILK", 12, 20, 40],
+        ["ING-COFFEE", 5, 7, 15],
+        ["ING-CUP", 50, 100, 300],
+      ] as const;
+      for (const [
+        ingredientSku,
+        minimumStock,
+        reorderPoint,
+        parStock,
+      ] of stockSettings) {
+        await db
+          .insert(ingredientOutletSettings)
+          .values({
+            tenantId: tenant.id,
+            outletId: outlet.id,
+            ingredientId: ingredientMap.get(ingredientSku)!.id,
+            minimumStock,
+            reorderPoint,
+            parStock,
+            defaultStorageLocationId: defaultStorageLocation?.id,
+            createdBy: admin.id,
+            updatedBy: admin.id,
+          })
+          .onConflictDoNothing({
+            target: [
+              ingredientOutletSettings.outletId,
+              ingredientOutletSettings.ingredientId,
+            ],
+          });
+      }
+
       const supplierSpecs = [
         {
           code: "SUP-001",
@@ -501,7 +598,7 @@ async function main(): Promise<void> {
     console.log(`Outlet : ${outlet.code} (${outlet.id})`);
     console.log(`Admin  : ${admin.email}`);
     console.log(
-      `Sample : ${shouldSeedSamples ? "master bahan & supplier siap" : "dilewati"}`,
+      `Sample : ${shouldSeedSamples ? "master bahan, supplier & lokasi stok siap" : "dilewati"}`,
     );
   } finally {
     await client.end({ timeout: 5 });

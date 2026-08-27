@@ -1,4 +1,10 @@
-# vinext-starter
+# Saji Flow Frontend v0.5.0
+
+Frontend Kotzen Operation/Saji Flow dengan autentikasi API lokal, Administrasi, Budget Planning, Purchase Order, dan Goods Receipt yang terhubung ke backend PostgreSQL.
+
+Menu **Penerimaan Barang** mendukung draft, penerimaan parsial, batch/expiry, posting inventory, ledger, audit trail, dan void melalui reversal.
+
+## Runtime
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
