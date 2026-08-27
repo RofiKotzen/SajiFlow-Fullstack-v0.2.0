@@ -20,6 +20,7 @@ import { SuppliersModule } from "./suppliers/suppliers.module";
 import { TenantsModule } from "./tenants/tenants.module";
 import { UsersModule } from "./users/users.module";
 import { UnitsModule } from "./units/units.module";
+import { RecipesModule } from "./recipes/recipes.module";
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { UnitsModule } from "./units/units.module";
     SuppliersModule,
     PermissionsModule,
     PurchaseOrdersModule,
+    RecipesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

@@ -13,6 +13,7 @@ import {
   purchaseOrders,
   supplierIngredients,
   suppliers,
+  tenants,
   units,
 } from "../database/schema";
 import { CreateSupplierCatalogDto } from "./dto/create-supplier-catalog.dto";
@@ -320,6 +321,12 @@ export class SuppliersService {
       dto.ingredientId,
       dto.purchaseUnitId,
     );
+    const [tenant] = await this.database.db
+      .select({ currencyCode: tenants.currencyCode })
+      .from(tenants)
+      .where(eq(tenants.id, actor.tenantId))
+      .limit(1);
+    if (!tenant) throw new NotFoundException("Tenant tidak ditemukan.");
     const created = await this.database.db.transaction(async (tx) => {
       if (dto.isPreferred)
         await tx
@@ -333,7 +340,6 @@ export class SuppliersService {
             and(
               eq(supplierIngredients.tenantId, actor.tenantId),
               eq(supplierIngredients.ingredientId, dto.ingredientId),
-              eq(supplierIngredients.purchaseUnitId, dto.purchaseUnitId),
               eq(supplierIngredients.isPreferred, true),
               eq(supplierIngredients.isActive, true),
               isNull(supplierIngredients.deletedAt),
@@ -351,6 +357,7 @@ export class SuppliersService {
           lastPrice: dto.lastPrice,
           minimumOrderQty: dto.minimumOrderQty ?? 1,
           isPreferred: dto.isPreferred ?? false,
+          currencyCode: tenant.currencyCode,
           createdBy: actor.userId,
           updatedBy: actor.userId,
         })
@@ -409,7 +416,6 @@ export class SuppliersService {
             and(
               eq(supplierIngredients.tenantId, actor.tenantId),
               eq(supplierIngredients.ingredientId, ingredientId),
-              eq(supplierIngredients.purchaseUnitId, purchaseUnitId),
               eq(supplierIngredients.isPreferred, true),
               eq(supplierIngredients.isActive, true),
               isNull(supplierIngredients.deletedAt),

@@ -8,6 +8,7 @@ import { ConnectedInventoryOverview } from "./inventory-overview";
 import { ConnectedMasterData } from "./master-data";
 import { ConnectedPurchaseOrders } from "./purchase-orders";
 import { ConnectedSupplierManagement } from "./supplier-management";
+import { ConnectedRecipeFoodCost } from "./recipe-food-cost";
 import { AuthGate, type ApiClient, type AuthSession } from "./sajiflow-api";
 
 type View =
@@ -880,10 +881,9 @@ function OperationWorkspace({
   logout: () => Promise<void>;
 }) {
   const [view, setView] = useState<View>("dashboard");
-  const [query, setQuery] = useState("");
   const [toast, setToast] = useState("");
   const [detail, setDetail] = useState<DetailSelection | null>(null);
-  const nav: { id: View; label: string; icon: IconName }[] = [
+  const nav = ([
     { id: "dashboard", label: "Ringkasan", icon: "grid" },
     { id: "pos", label: "POS & Penjualan", icon: "pos" },
     { id: "kds", label: "Kitchen Display", icon: "kitchen" },
@@ -895,7 +895,7 @@ function OperationWorkspace({
     { id: "suppliers", label: "Supplier", icon: "truck" },
     { id: "recipes", label: "Resep & Food Cost", icon: "recipe" },
     { id: "settings", label: "Administrasi", icon: "grid" },
-  ]
+  ] satisfies { id: View; label: string; icon: IconName }[])
     .filter(
       (item) =>
         item.id !== "masters" ||
@@ -906,6 +906,11 @@ function OperationWorkspace({
       (item) =>
         item.id !== "suppliers" ||
         session.user.permissions.includes("suppliers.read"),
+    )
+    .filter(
+      (item) =>
+        item.id !== "recipes" ||
+        session.user.permissions.includes("recipes.read"),
     );
   const titles: Record<View, { title: string; subtitle: string }> = {
     dashboard: {
@@ -986,7 +991,6 @@ function OperationWorkspace({
               className={view === item.id ? "active" : ""}
               onClick={() => {
                 setView(item.id);
-                setQuery("");
               }}
             >
               <Icon name={item.icon} />
@@ -1110,11 +1114,7 @@ function OperationWorkspace({
             />
           )}
           {view === "recipes" && (
-            <RecipeFoodCost
-              query={query}
-              setQuery={setQuery}
-              onSelect={(data) => setDetail({ kind: "recipe", data })}
-            />
+            <ConnectedRecipeFoodCost session={session} api={api} onNotify={notify} />
           )}
           {view === "budgets" && (
             <ConnectedBudgetPlanning
@@ -3133,6 +3133,8 @@ function KitchenDisplay({
   );
 }
 
+// Retained as a visual reference while the connected module is stabilized.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function RecipeFoodCost({
   query,
   setQuery,

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import postgres from "postgres";
+import { splitMigrationBatches } from "./migration-source";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -55,7 +56,12 @@ async function main(): Promise<void> {
       }
 
       console.log(`APPLY ${filename}`);
-      await client.unsafe(source);
+      const batches = splitMigrationBatches(source);
+      for (const [index, batch] of batches.entries()) {
+        if (batches.length > 1)
+          console.log(`  BATCH ${index + 1}/${batches.length}`);
+        await client.unsafe(batch);
+      }
       await client`
         insert into public.schema_migrations (filename, checksum) values (${filename}, ${checksum})
       `;

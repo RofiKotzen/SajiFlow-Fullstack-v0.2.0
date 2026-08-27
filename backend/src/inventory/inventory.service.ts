@@ -36,6 +36,7 @@ import {
 } from "../database/schema";
 import { ListInventoryQueryDto } from "./dto/list-inventory-query.dto";
 import { ListStockMovementsQueryDto } from "./dto/list-stock-movements-query.dto";
+import { weightedInventoryCost } from "./inventory-valuation.service";
 
 type InventoryStatus = "out" | "critical" | "low" | "safe";
 
@@ -80,7 +81,7 @@ export class InventoryService {
         outletName: outlets.name,
         onHand: sql<number>`coalesce(sum(${stockBatches.quantityOnHand}), 0)`,
         stockValue: sql<number>`coalesce(sum(${stockBatches.quantityOnHand} * ${stockBatches.unitCost}), 0)`,
-        weightedUnitCost: sql<number>`case when sum(${stockBatches.quantityOnHand}) > 0 then sum(${stockBatches.quantityOnHand} * ${stockBatches.unitCost}) / sum(${stockBatches.quantityOnHand}) else 0 end`,
+        weightedUnitCost: sql<number>`coalesce(${weightedInventoryCost}, 0)`,
         minimumStock: ingredientOutletSettings.minimumStock,
         reorderPoint: ingredientOutletSettings.reorderPoint,
         parStock: ingredientOutletSettings.parStock,

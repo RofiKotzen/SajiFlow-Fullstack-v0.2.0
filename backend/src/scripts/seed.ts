@@ -97,6 +97,16 @@ const permissionSeed = [
   ["suppliers.update", "suppliers", "Mengubah atau mengarsipkan supplier"],
   ["suppliers.catalog.read", "suppliers", "Melihat katalog bahan supplier"],
   ["suppliers.catalog.manage", "suppliers", "Mengelola katalog bahan supplier"],
+  ["recipes.read", "recipes", "Melihat struktur dan instruksi recipe"],
+  ["recipes.create", "recipes", "Membuat recipe draft"],
+  ["recipes.update_draft", "recipes", "Mengubah recipe draft"],
+  ["recipes.recalculate", "recipes", "Menghitung ulang food cost per outlet"],
+  ["recipes.approve", "recipes", "Menyetujui recipe dan snapshot costing"],
+  ["recipes.revise", "recipes", "Membuat revisi recipe approved"],
+  ["recipes.archive", "recipes", "Mengarsipkan recipe"],
+  ["recipes.activate", "recipes", "Mengaktifkan kembali recipe"],
+  ["recipes.cost.read", "recipes", "Melihat nominal cost, profit, dan margin"],
+  ["recipes.audit.read", "recipes", "Melihat audit trail recipe"],
 ] as const;
 
 async function main(): Promise<void> {
@@ -597,6 +607,7 @@ async function main(): Promise<void> {
             lastPrice,
             minimumOrderQty: 1,
             isPreferred: true,
+            currencyCode: tenant.currencyCode,
             createdBy: admin.id,
             updatedBy: admin.id,
           });
