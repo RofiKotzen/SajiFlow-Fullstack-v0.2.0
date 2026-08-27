@@ -5,10 +5,11 @@ import { AdminConsole, SessionControls } from "./admin-console";
 import { ConnectedBudgetPlanning } from "./budget-planning";
 import { ConnectedGoodsReceipts } from "./goods-receipts";
 import { ConnectedInventoryOverview } from "./inventory-overview";
+import { ConnectedMasterData } from "./master-data";
 import { ConnectedPurchaseOrders } from "./purchase-orders";
 import { AuthGate, type ApiClient, type AuthSession } from "./sajiflow-api";
 
-type View = "dashboard" | "orders" | "receipts" | "suppliers" | "recipes" | "budgets" | "kds" | "inventory" | "pos" | "settings";
+type View = "dashboard" | "orders" | "receipts" | "suppliers" | "recipes" | "budgets" | "kds" | "inventory" | "masters" | "pos" | "settings";
 type IconName = "grid" | "cart" | "box" | "truck" | "recipe" | "budget" | "kitchen" | "inventory" | "pos" | "search" | "plus" | "bell" | "arrow" | "check" | "close";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -131,8 +132,8 @@ function OperationWorkspace({ session, api, logout }: { session: AuthSession; ap
   const [detail, setDetail] = useState<DetailSelection | null>(null);
   const filteredSuppliers = useMemo(() => supplierList.filter((supplier) => `${supplier.name} ${supplier.category}`.toLowerCase().includes(query.toLowerCase())), [query]);
   const nav: { id: View; label: string; icon: IconName }[] = [
-    { id: "dashboard", label: "Ringkasan", icon: "grid" }, { id: "pos", label: "POS & Penjualan", icon: "pos" }, { id: "kds", label: "Kitchen Display", icon: "kitchen" }, { id: "inventory", label: "Inventory & Stock", icon: "inventory" }, { id: "orders", label: "Purchase Order", icon: "cart" }, { id: "budgets", label: "Budget Planning", icon: "budget" }, { id: "receipts", label: "Penerimaan Barang", icon: "box" }, { id: "suppliers", label: "Supplier", icon: "truck" }, { id: "recipes", label: "Resep & Food Cost", icon: "recipe" }, { id: "settings", label: "Administrasi", icon: "grid" },
-  ];
+    { id: "dashboard", label: "Ringkasan", icon: "grid" }, { id: "pos", label: "POS & Penjualan", icon: "pos" }, { id: "kds", label: "Kitchen Display", icon: "kitchen" }, { id: "inventory", label: "Inventory & Stock", icon: "inventory" }, { id: "masters", label: "Master Bahan & Satuan", icon: "box" }, { id: "orders", label: "Purchase Order", icon: "cart" }, { id: "budgets", label: "Budget Planning", icon: "budget" }, { id: "receipts", label: "Penerimaan Barang", icon: "box" }, { id: "suppliers", label: "Supplier", icon: "truck" }, { id: "recipes", label: "Resep & Food Cost", icon: "recipe" }, { id: "settings", label: "Administrasi", icon: "grid" },
+  ].filter((item) => item.id !== "masters" || session.user.permissions.includes("ingredients.read") || session.user.permissions.includes("units.read"));
   const titles: Record<View, { title: string; subtitle: string }> = {
     dashboard: { title: "Purchasing Overview", subtitle: "Pantau pembelian, penerimaan, dan kinerja supplier dalam satu tempat." },
     orders: { title: "Purchase Order", subtitle: "Kelola proses pembelian dari permintaan hingga pesanan disetujui." },
@@ -142,6 +143,7 @@ function OperationWorkspace({ session, api, logout }: { session: AuthSession; ap
     budgets: { title: "Budget Planning", subtitle: "Rencanakan, alokasikan, dan kendalikan anggaran pembelian setiap periode." },
     kds: { title: "Kitchen Display System", subtitle: "Kelola antrean produksi dan waktu pelayanan dapur secara real-time." },
     inventory: { title: "Inventory & Stock Control", subtitle: "Pantau ketersediaan, pergerakan, waste, dan kebutuhan stok bahan baku." },
+    masters: { title: "Master Bahan & Satuan", subtitle: "Kelola identitas bahan, satuan dasar, dan parameter persediaan setiap outlet." },
     pos: { title: "POS & Sales", subtitle: "Proses transaksi, kelola pesanan aktif, dan pantau penjualan setiap shift." },
     settings: { title: "Administrasi Workspace", subtitle: "Kelola organisasi, outlet, pengguna, role, dan hak akses Saji Flow." },
   };
@@ -156,7 +158,7 @@ function OperationWorkspace({ session, api, logout }: { session: AuthSession; ap
     </aside>
     <section className="workspace">
       <header className="topbar"><div className="mobile-brand"><div className="brand-mark">K</div><strong>Kotzen Operation</strong></div><div className="top-actions"><SessionControls api={api} logout={logout} /><button className="icon-button" aria-label="Notifikasi"><Icon name="bell"/><span className="notification-dot" /></button><span className="date-chip">24 Agustus 2026</span></div></header>
-      <div className="content"><div className="page-heading"><div><p className="breadcrumb">SAJI FLOW / {view === "recipes" ? "FOOD COST" : view === "budgets" ? "BUDGET CONTROL" : view === "kds" ? "KITCHEN OPERATIONS" : view === "inventory" ? "INVENTORY CONTROL" : view === "pos" ? "POINT OF SALE" : view === "settings" ? "WORKSPACE ADMIN" : "PURCHASING"}</p><h1>{titles[view].title}</h1><p>{titles[view].subtitle}</p></div>{view === "recipes" ? <button className="primary-button" onClick={() => notify("Form resep baru siap digunakan pada tahap pengembangan berikutnya.")}><Icon name="plus"/> Tambah Resep</button> : view === "kds" ? <button className="secondary-button" onClick={() => notify("Mode layar dapur siap diaktifkan.")}><Icon name="kitchen"/> Mode Layar Dapur</button> : view === "pos" ? <button className="secondary-button" onClick={() => notify("Ringkasan penutupan shift kasir siap ditinjau.")}><Icon name="check"/> Tutup Shift</button> : null}</div>
+      <div className="content"><div className="page-heading"><div><p className="breadcrumb">SAJI FLOW / {view === "recipes" ? "FOOD COST" : view === "budgets" ? "BUDGET CONTROL" : view === "kds" ? "KITCHEN OPERATIONS" : view === "inventory" ? "INVENTORY CONTROL" : view === "masters" ? "MASTER DATA" : view === "pos" ? "POINT OF SALE" : view === "settings" ? "WORKSPACE ADMIN" : "PURCHASING"}</p><h1>{titles[view].title}</h1><p>{titles[view].subtitle}</p></div>{view === "recipes" ? <button className="primary-button" onClick={() => notify("Form resep baru siap digunakan pada tahap pengembangan berikutnya.")}><Icon name="plus"/> Tambah Resep</button> : view === "kds" ? <button className="secondary-button" onClick={() => notify("Mode layar dapur siap diaktifkan.")}><Icon name="kitchen"/> Mode Layar Dapur</button> : view === "pos" ? <button className="secondary-button" onClick={() => notify("Ringkasan penutupan shift kasir siap ditinjau.")}><Icon name="check"/> Tutup Shift</button> : null}</div>
         {view === "dashboard" && <Dashboard setView={setView} onSelect={(data) => setDetail({ kind: "order", data })} />}
         {view === "orders" && <ConnectedPurchaseOrders session={session} api={api} onNotify={notify} />}
         {view === "suppliers" && <Suppliers suppliers={filteredSuppliers} query={query} setQuery={setQuery} onSelect={(data) => setDetail({ kind: "supplier", data })} />}
@@ -165,6 +167,7 @@ function OperationWorkspace({ session, api, logout }: { session: AuthSession; ap
         {view === "budgets" && <ConnectedBudgetPlanning session={session} api={api} onNotify={notify} />}
         {view === "kds" && <KitchenDisplay onSelect={(data) => setDetail({ kind: "kds", data })} onNotify={notify} />}
         {view === "inventory" && <ConnectedInventoryOverview session={session} api={api} />}
+        {view === "masters" && <ConnectedMasterData session={session} api={api} onNotify={notify} />}
         {view === "pos" && <PosSales onSelect={(data) => setDetail({ kind: "sale", data })} onNotify={notify} />}
         {view === "settings" && <AdminConsole session={session} api={api} notify={notify} />}
       </div>

@@ -1,0 +1,256 @@
+:root {
+  --type-body: 16px;
+  --type-control: 15px;
+  --type-label: 14px;
+  --type-meta: 13px;
+  --type-section: 18px;
+  --type-line-body: 1.5;
+  --type-line-compact: 1.35;
+}
+
+/* Shared readable baseline for every connected Saji Flow surface. */
+:where(.app-shell, .login-shell, .modal-backdrop, .admin-dialog-backdrop, .md-modal) {
+  font-size: var(--type-body);
+  line-height: var(--type-line-body);
+}
+
+:where(.content, .sidebar, .topbar, .login-shell, .modal, .admin-dialog, .md-modal) :where(input, select, textarea) {
+  font-size: var(--type-control) !important;
+  line-height: var(--type-line-compact);
+  min-height: 42px;
+}
+
+:where(.content, .sidebar, .topbar, .login-shell, .modal, .admin-dialog, .md-modal) button:not(.icon-button):not(.row-action) {
+  font-size: var(--type-control) !important;
+  line-height: var(--type-line-compact);
+  min-height: 40px;
+}
+
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(p, li) {
+  font-size: var(--type-body) !important;
+  line-height: var(--type-line-body);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) :where(section, article, div) > :where(strong, b) {
+  font-size: var(--type-body) !important;
+  line-height: var(--type-line-compact);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) :where(section, article, div) > span:not([aria-hidden="true"]) {
+  font-size: var(--type-label) !important;
+  line-height: var(--type-line-compact);
+}
+
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(label, legend),
+:where(.content, .modal, .admin-dialog, .md-modal) [class*="-tabs"] button,
+:where(.content, .modal, .admin-dialog, .md-modal) [class*="-toolbar"] label {
+  font-size: var(--type-label) !important;
+  line-height: var(--type-line-compact);
+}
+
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(small, code),
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(.eyebrow, .breadcrumb),
+:where(.content, .modal, .admin-dialog, .md-modal) [class*="-meta"] {
+  font-size: var(--type-meta) !important;
+  line-height: var(--type-line-compact);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) :where(h2, h3) {
+  font-size: var(--type-section) !important;
+  line-height: 1.25;
+}
+
+/* Tables keep horizontal scrolling while their content reaches the new scale. */
+:where(.content, .modal, .admin-dialog, .md-modal) table {
+  min-width: max(760px, 100%);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) th {
+  font-size: var(--type-label) !important;
+  line-height: var(--type-line-compact);
+  padding-top: 13px;
+  padding-bottom: 13px;
+  white-space: nowrap;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) td {
+  font-size: var(--type-control) !important;
+  line-height: var(--type-line-body);
+  padding-top: 15px;
+  padding-bottom: 15px;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) td :where(strong, b) {
+  font-size: var(--type-control) !important;
+  line-height: var(--type-line-compact);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) td small {
+  font-size: var(--type-meta) !important;
+  line-height: var(--type-line-compact);
+}
+
+/* Shared chips, filters, statuses, and badges. */
+:where(.content, .modal, .admin-dialog, .md-modal) :where(
+  .badge,
+  .small-tag,
+  .coverage-chip,
+  .shift-chip,
+  .cart-count,
+  [class$="-status"],
+  [class*="-status "],
+  [class$="-type"],
+  [class*="-type "]
+) {
+  font-size: var(--type-label) !important;
+  line-height: var(--type-line-compact);
+}
+
+/* Card and list values remain visually stronger than their metadata. */
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(
+  .panel-heading,
+  .po-list-heading,
+  .io-panel-heading,
+  .subpanel-heading,
+  .cart-heading,
+  .shift-section-head,
+  .mode-heading
+) h2,
+:where(.content, .modal, .admin-dialog, .md-modal) :where(article, .panel, .data-panel) > header h3 {
+  font-size: var(--type-section) !important;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) :where(
+  .stat-card,
+  .attention-item,
+  .receipt-main,
+  .supplier-main,
+  .po-history-list,
+  .io-ledger,
+  .inventory-alerts,
+  .movement-list,
+  .transfer-list,
+  .waste-list,
+  .cart-items,
+  .active-order-card,
+  .sales-detail-items,
+  .permission-groups
+) strong {
+  font-size: var(--type-control) !important;
+  line-height: var(--type-line-compact);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal) :where(
+  .stat-card,
+  .attention-item,
+  .receipt-main,
+  .supplier-main,
+  .po-history-list,
+  .io-ledger,
+  .inventory-alerts,
+  .movement-list,
+  .transfer-list,
+  .waste-list,
+  .cart-items,
+  .active-order-card,
+  .sales-detail-items,
+  .permission-groups
+) small {
+  font-size: var(--type-meta) !important;
+  line-height: var(--type-line-compact);
+}
+
+/* Navigation and authentication are part of the same readable system. */
+.sidebar {
+  overflow-y: auto;
+}
+
+.sidebar nav button,
+.sidebar-card strong,
+.profile strong,
+.session-controls :where(button, select) {
+  font-size: var(--type-label) !important;
+  line-height: var(--type-line-compact);
+}
+
+.sidebar :where(.nav-label, small, .profile span, .brand span),
+.topbar :where(.date-chip) {
+  font-size: var(--type-meta) !important;
+  line-height: var(--type-line-compact);
+}
+
+.login-card :where(label, input, button) {
+  font-size: var(--type-control) !important;
+}
+
+.login-card :where(.login-subtitle, .api-hint),
+.login-brand small,
+.login-flow i {
+  font-size: var(--type-meta) !important;
+  line-height: var(--type-line-body);
+}
+
+.login-message > span {
+  font-size: var(--type-body) !important;
+  line-height: var(--type-line-body);
+}
+
+.login-card h2 {
+  font-size: 33px !important;
+}
+
+/* Preserve deliberately large page and financial display values. */
+.page-heading h1 {
+  font-size: 31px !important;
+}
+
+.payment-sheet-head h3,
+.sales-detail-total strong {
+  font-size: 28px !important;
+}
+
+.grand-total strong {
+  font-size: 20px !important;
+}
+
+@media (max-width: 1100px) {
+  :where(.content, .modal, .admin-dialog, .md-modal) [class*="-toolbar"] {
+    align-items: stretch;
+  }
+
+  :where(.content, .modal, .admin-dialog, .md-modal) [class*="-toolbar"] :where(input, select, button) {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --type-body: 15px;
+    --type-control: 15px;
+    --type-label: 14px;
+    --type-meta: 12px;
+    --type-section: 17px;
+  }
+
+  .content {
+    overflow-x: hidden;
+  }
+
+  .page-heading h1 {
+    font-size: 26px !important;
+  }
+
+  :where(.content, .modal, .admin-dialog, .md-modal) :where(.table-wrap, [class$="-list"], [class$="-ledger"]) {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+  }
+
+  :where(.content, .modal, .admin-dialog, .md-modal) table {
+    min-width: 760px;
+  }
+
+  :where(.content, .modal, .admin-dialog, .md-modal) :where(button, .badge, [class$="-status"]) {
+    white-space: normal;
+  }
+}

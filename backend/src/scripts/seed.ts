@@ -86,6 +86,12 @@ const permissionSeed = [
     "Membatalkan penerimaan melalui reversal stok",
   ],
   ["inventory.read", "inventory", "Melihat saldo, batch, dan ledger stok"],
+  ["units.read", "units", "Melihat master satuan"],
+  ["units.create", "units", "Membuat satuan"],
+  ["units.update", "units", "Mengubah atau mengarsipkan satuan"],
+  ["ingredients.read", "ingredients", "Melihat master bahan"],
+  ["ingredients.create", "ingredients", "Membuat bahan"],
+  ["ingredients.update", "ingredients", "Mengubah bahan dan pengaturan outlet"],
 ] as const;
 
 async function main(): Promise<void> {

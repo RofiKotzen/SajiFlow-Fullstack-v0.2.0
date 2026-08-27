@@ -10,6 +10,7 @@ import { validateEnv } from "./config/env.validation";
 import { DatabaseModule } from "./database/database.module";
 import { HealthModule } from "./health/health.module";
 import { InventoryModule } from "./inventory/inventory.module";
+import { IngredientsModule } from "./ingredients/ingredients.module";
 import { GoodsReceiptsModule } from "./goods-receipts/goods-receipts.module";
 import { OutletsModule } from "./outlets/outlets.module";
 import { PermissionsModule } from "./permissions/permissions.module";
@@ -17,6 +18,7 @@ import { PurchaseOrdersModule } from "./purchase-orders/purchase-orders.module";
 import { RolesModule } from "./roles/roles.module";
 import { TenantsModule } from "./tenants/tenants.module";
 import { UsersModule } from "./users/users.module";
+import { UnitsModule } from "./units/units.module";
 
 @Module({
   imports: [
@@ -32,9 +34,11 @@ import { UsersModule } from "./users/users.module";
     GoodsReceiptsModule,
     HealthModule,
     InventoryModule,
+    IngredientsModule,
     TenantsModule,
     OutletsModule,
     UsersModule,
+    UnitsModule,
     RolesModule,
     PermissionsModule,
     PurchaseOrdersModule,
