@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import "./integration.css";
 import "./typography.css";
@@ -11,6 +12,12 @@ const inter = Inter({
   variable: "--font-inter",
 });
 
+const jetBrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-jetbrains-mono",
+});
+
 export const metadata: Metadata = {
   title: "Kotzen Operation",
   description: "Sistem operasional terpadu untuk POS, dapur, inventori, purchasing, supplier, dan pengendalian anggaran.",
@@ -20,5 +27,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="id" className={inter.variable}><body>{children}</body></html>;
+  return <html lang="id" className={inter.variable}><body className={jetBrainsMono.variable}>{children}</body></html>;
 }

@@ -113,12 +113,17 @@ export function ConnectedInventoryOverview({ session, api }: { session: AuthSess
   const [movementType, setMovementType] = useState("all");
   const [loading, setLoading] = useState(allowed);
   const [error, setError] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailTarget, setDetailTarget] = useState<InventoryItem | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!allowed) return;
     let active = true;
     async function load() {
       setLoading(true);
+      setError("");
       try {
         const [stock, lookup, ledger] = await Promise.all([
           api<Overview>("/inventory"),
@@ -137,7 +142,7 @@ export function ConnectedInventoryOverview({ session, api }: { session: AuthSess
     }
     void load();
     return () => { active = false; };
-  }, [allowed, api]);
+  }, [allowed, api, reloadKey]);
 
   const visibleItems = useMemo(() => (overview?.items ?? []).filter((item) => {
     const matched = `${item.ingredientName} ${item.sku} ${item.categoryName ?? ""} ${item.locationNames}`.toLowerCase().includes(search.toLowerCase());
@@ -157,23 +162,26 @@ export function ConnectedInventoryOverview({ session, api }: { session: AuthSess
   const maxCategoryValue = Math.max(...categoryValues.map((item) => item.value), 1);
 
   async function openDetail(item: InventoryItem) {
-    setLoading(true); setError("");
+    setDetailTarget(item); setDetailLoading(true); setDetailError(""); setMode("detail");
     try {
       const value = await api<InventoryDetail>(`/inventory/${item.ingredientId}?outletId=${item.outletId}`);
       setDetail(normalizeDetail(value));
-      setMode("detail");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Detail stok gagal dimuat."); }
-    finally { setLoading(false); }
+    } catch (cause) { setDetailError(cause instanceof Error ? cause.message : "Detail stok gagal dimuat."); }
+    finally { setDetailLoading(false); }
   }
 
-  if (!allowed) return <div className="io-empty"><strong>Akses Inventory belum diberikan</strong><span>Role ini memerlukan permission inventory.read.</span></div>;
-  if (loading && !overview) return <div className="io-loading"><span/><strong>Menghitung saldo inventory…</strong></div>;
+  if (!allowed) return <div className="inventory-visual-v2"><StatePanel kind="forbidden" title="Akses Inventory belum diberikan" message="Role ini memerlukan permission inventory.read." /></div>;
+  if (loading && !overview) return <div className="inventory-visual-v2"><StatePanel kind="loading" title="Menghitung saldo inventory…" message="Saldo dan nilai stok sedang dimuat dari ledger." /></div>;
+  if (!overview && error) return <div className="inventory-visual-v2"><StatePanel kind="error" title="Inventory belum dapat ditampilkan" message={error} actionLabel="Coba lagi" onAction={() => setReloadKey((value) => value + 1)} /></div>;
 
-  return <div className="inventory-connected">
+  return <div className="inventory-connected inventory-visual-v2">
     {error && <div className="io-error" role="alert"><div><strong>Inventory belum dapat ditampilkan</strong><span>{error}</span></div><button onClick={() => setError("")}>×</button></div>}
 
-    {mode === "detail" && detail ? <InventoryDetailView item={detail} onBack={() => { setMode("overview"); setDetail(null); }}/> : <>
-      <div className="io-sync"><div><span>✓</span><div><strong>Saldo terhubung ke stock ledger</strong><small>Goods Receipt menambah stok dan Void membuat reversal otomatis</small></div></div><b>READ ONLY</b></div>
+    {mode === "detail" ? detailLoading ? <StatePanel kind="loading" title="Memuat detail inventory…" message="Batch, lokasi, dan movement history sedang diambil." /> : detailError ? <StatePanel kind="error" title="Detail inventory gagal dimuat" message={detailError} actionLabel="Coba lagi" onAction={() => detailTarget && void openDetail(detailTarget)} secondaryLabel="Kembali" onSecondary={() => { setMode("overview"); setDetailError(""); }} /> : detail ? <InventoryDetailView item={detail} onBack={() => { setMode("overview"); setDetail(null); setDetailTarget(null); }}/> : null : <>
+      <header className="io-page-head">
+        <div><span>INVENTORY</span><h1>Ringkasan Stok</h1><p>Saldo bahan, batch, dan ledger pergerakan dari transaksi backend.</p></div>
+        <div className="io-tabs" role="tablist" aria-label="Tampilan inventory"><button role="tab" aria-selected={mode === "overview"} className={mode === "overview" ? "active" : ""} onClick={() => setMode("overview")}>Ringkasan Stok</button><button role="tab" aria-selected={mode === "movements"} className={mode === "movements" ? "active" : ""} onClick={() => setMode("movements")}>Pergerakan <span>{visibleMovements.length}</span></button></div>
+      </header>
       <div className="stats-grid io-stats">
         <article className="stat-card"><div className="stat-icon green">Rp</div><div><span>Nilai persediaan</span><strong>{rupiah(visibleValue)}</strong><small>{visibleItems.length} posisi bahan</small></div></article>
         <article className="stat-card"><div className="stat-icon blue">SKU</div><div><span>Bahan tersimpan</span><strong>{visibleItems.length}</strong><small>{visibleItems.reduce((sum, item) => sum + item.batchCount, 0)} batch aktif</small></div></article>
@@ -181,8 +189,8 @@ export function ConnectedInventoryOverview({ session, api }: { session: AuthSess
         <article className="stat-card"><div className="stat-icon purple">↕</div><div><span>Baris ledger</span><strong>{visibleMovements.length}</strong><small>{movements.filter((item) => item.movementType === "receipt").length} dari penerimaan</small></div></article>
       </div>
 
-      <section className="panel io-workspace">
-        <div className="io-tabs"><button className={mode === "overview" ? "active" : ""} onClick={() => setMode("overview")}>Posisi Stok <span>{visibleItems.length}</span></button><button className={mode === "movements" ? "active" : ""} onClick={() => setMode("movements")}>Kartu Stok <span>{visibleMovements.length}</span></button></div>
+      <section className={`io-workspace io-workspace-${mode}`}>
+        <div className="io-balance-head"><div><h2>{mode === "overview" ? "Saldo Bahan" : "Ledger Pergerakan Stok"}</h2><p>{mode === "overview" ? `${visibleItems.length} bahan sesuai filter` : `${visibleMovements.length} movement sesuai filter`}</p></div><span>Read only</span></div>
         <div className="io-toolbar"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={mode === "overview" ? "Cari bahan, SKU, kategori, atau lokasi…" : "Cari nomor ledger, referensi, atau bahan…"}/><select value={outletId} onChange={(event) => { setOutletId(event.target.value); setLocationId("all"); }}><option value="all">Semua outlet</option>{lookups.outlets.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><select value={locationId} onChange={(event) => setLocationId(event.target.value)}><option value="all">Semua lokasi</option>{lookups.storageLocations.filter((item) => outletId === "all" || item.outletId === outletId).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select>{mode === "overview" ? <><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="all">Semua kategori</option>{lookups.categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><select value={stockStatus} onChange={(event) => setStockStatus(event.target.value)}><option value="all">Semua status</option>{Object.entries(STATUS).map(([value, item]) => <option value={value} key={value}>{item.label}</option>)}</select></> : <select value={movementType} onChange={(event) => setMovementType(event.target.value)}><option value="all">Semua pergerakan</option>{Object.entries(MOVEMENT_LABEL).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select>}</div>
 
         {mode === "overview" && <><div className="io-overview-grid"><section><div className="io-subheading"><div><h2>Nilai Stok per Kategori</h2><p>Komposisi persediaan dari batch aktif</p></div><strong>{rupiah(visibleValue)}</strong></div><div className="io-category-bars">{categoryValues.map((item) => <div key={item.name}><div><span>{item.name}</span><b>{rupiah(item.value)}</b></div><i><span style={{ width: `${(item.value / maxCategoryValue) * 100}%` }}/></i></div>)}</div>{!categoryValues.length && <p className="io-muted">Belum ada nilai stok pada filter ini.</p>}</section><section><div className="io-subheading"><div><h2>Prioritas Stok</h2><p>Bahan yang membutuhkan pemeriksaan</p></div><strong>{visibleAttention} item</strong></div><div className="io-priorities">{visibleItems.filter((item) => item.status !== "safe" || (item.expiryDays !== null && item.expiryDays <= 7)).slice(0, 4).map((item) => <button key={`${item.ingredientId}-${item.outletId}`} onClick={() => void openDetail(item)}><span className={`io-priority-icon io-${item.status}`}>{item.expiryDays !== null && item.expiryDays <= 7 ? `${Math.max(0, item.expiryDays)}d` : "!"}</span><div><strong>{item.ingredientName}</strong><small>{item.status !== "safe" ? STATUS[item.status].note : expiryText(item.expiryDays)}</small></div><b>→</b></button>)}{!visibleAttention && <p className="io-muted">Seluruh stok pada filter ini dalam kondisi aman.</p>}</div></section></div>
@@ -191,6 +199,14 @@ export function ConnectedInventoryOverview({ session, api }: { session: AuthSess
         {mode === "movements" && <div className="io-ledger"><div className="io-ledger-head"><span>Ledger & Referensi</span><span>Bahan / Lokasi</span><span>Jenis</span><span>Perubahan</span><span>Saldo Setelah</span><span>Status</span></div>{visibleMovements.map((item) => <article key={item.id}><div><strong>{item.movementNo}</strong><small>{item.referenceNo} • {dateTime(item.movementAt)}</small></div><div><strong>{item.ingredientName}</strong><small>{item.storageLocationName}{item.batchNo ? ` • ${item.batchNo}` : ""}</small></div><span className={`io-movement-type ${item.quantityDelta >= 0 ? "in" : "out"}`}>{MOVEMENT_LABEL[item.movementType] ?? item.movementType}</span><b className={item.quantityDelta >= 0 ? "positive" : "negative"}>{item.quantityDelta >= 0 ? "+" : ""}{number(item.quantityDelta)} {item.unitCode}<small>{item.valueDelta >= 0 ? "+" : ""}{rupiah(item.valueDelta)}</small></b><strong>{item.balanceAfter === null ? "–" : `${number(item.balanceAfter)} ${item.unitCode}`}</strong><span className={`io-ledger-status ${item.status}`}>{item.status}</span></article>)}{!visibleMovements.length && <div className="io-empty"><strong>Ledger tidak ditemukan</strong><span>Belum ada pergerakan yang sesuai filter.</span></div>}</div>}
       </section>
     </>}
+  </div>;
+}
+
+function StatePanel({ kind, title, message, actionLabel, onAction, secondaryLabel, onSecondary }: { kind: "loading" | "empty" | "forbidden" | "error"; title: string; message: string; actionLabel?: string; onAction?: () => void; secondaryLabel?: string; onSecondary?: () => void }) {
+  return <div className={`io-state io-state-${kind}`} role={kind === "error" ? "alert" : kind === "loading" ? "status" : undefined} aria-live={kind === "loading" ? "polite" : undefined}>
+    {kind === "loading" && <span className="io-state-spinner" aria-hidden="true" />}
+    <strong>{title}</strong><span>{message}</span>
+    {(actionLabel || secondaryLabel) && <div>{secondaryLabel && <button className="ghost-button" onClick={onSecondary}>{secondaryLabel}</button>}{actionLabel && <button className="secondary-button" onClick={onAction}>{actionLabel}</button>}</div>}
   </div>;
 }
 

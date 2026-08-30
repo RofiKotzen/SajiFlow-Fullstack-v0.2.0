@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AdminConsole, SessionControls } from "./admin-console";
 import { ConnectedBudgetPlanning } from "./budget-planning";
 import { ConnectedGoodsReceipts } from "./goods-receipts";
@@ -891,6 +891,8 @@ function OperationWorkspace({
   const [detail, setDetail] = useState<DetailSelection | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const permissions = session.user.permissions;
   const hasAnyPermission = (...codes: string[]) =>
     codes.some((code) => permissions.includes(code));
@@ -1005,10 +1007,45 @@ function OperationWorkspace({
     window.setTimeout(() => setToast(""), 3000);
   }
 
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const sidebar = sidebarRef.current;
+    const mobileMenuButton = mobileMenuButtonRef.current;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    sidebar?.querySelector<HTMLElement>("button, [href], select, input")?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !sidebar) return;
+      const focusable = [...sidebar.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      mobileMenuButton?.focus();
+    };
+  }, [mobileNavOpen]);
+
   return (
-    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main className={`app-shell app-shell-v2 ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {mobileNavOpen && <button className="nav-scrim" aria-label="Tutup navigasi" onClick={() => setMobileNavOpen(false)} />}
-      <aside className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`}>
+      <aside id="saji-primary-navigation" ref={sidebarRef} className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`} aria-label="Navigasi aplikasi">
         <div className="brand">
           <div className="brand-mark">S</div>
           <div>
@@ -1050,19 +1087,20 @@ function OperationWorkspace({
           </button>
         </div>
       </aside>
-      <section className="workspace">
+      <section className={`workspace view-${view}`}>
         <header className="topbar">
           <div className="mobile-brand">
-            <button className="icon-button mobile-menu" aria-label="Buka navigasi" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Icon name="menu" /></button>
+            <button ref={mobileMenuButtonRef} className="icon-button mobile-menu" aria-label="Buka navigasi" aria-expanded={mobileNavOpen} aria-controls="saji-primary-navigation" onClick={() => setMobileNavOpen(true)}><Icon name="menu" /></button>
             <div><strong>Saji Flow</strong><span>{titles[view].title}</span></div>
           </div>
+          <button className="icon-button desktop-collapse" aria-label={sidebarCollapsed ? "Perluas sidebar" : "Ciutkan sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}><Icon name="collapse" /></button>
+          <SessionControls api={api} logout={logout} />
           <div className="top-actions">
-            <SessionControls api={api} logout={logout} />
             <button className="icon-button" aria-label="Notifikasi">
               <Icon name="bell" />
               <span className="notification-dot" />
             </button>
-            <span className="date-chip">{new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric" }).format(new Date())}</span>
+            <div className="topbar-profile"><div className="avatar">{initials(session.user.fullName)}</div><div><strong>{session.user.fullName}</strong><span>{session.user.roles[0] || "User"}</span></div><button onClick={() => void logout()}>Keluar</button></div>
           </div>
         </header>
         <div className="content">
