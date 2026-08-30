@@ -154,3 +154,31 @@ th { position: sticky; top: 0; z-index: 1; }
 .app-shell-v2 .topbar-profile strong { font-size: 13px; font-weight: 500; }
 .app-shell-v2 .topbar-profile span { font-size: 11px; }
 .app-shell-v2 .topbar-profile > button { min-height: 30px; padding: 6px 8px; font-size: 11px !important; }
+
+/* Phase 2 shared Lovable primitives, contained by the approved shell. */
+.app-shell-v2 { --sf2-card: #fffdf8; --sf2-cream: #f7f4ec; --sf2-ink: #263832; --sf2-mute: #74817c; --sf2-olive: #70764b; --sf2-olive-soft: #eff1e5; --sf2-terra: #b8684f; --sf2-line: rgba(38,56,50,.08); --sf2-radius: 14px; }
+.app-shell-v2 .content > :where(section,div) { min-width: 0; }
+.app-shell-v2 .content :where(.panel,.data-panel,.tenant-panel,[class$="-panel"],[class$="-card"]) { border-color: var(--sf2-line); border-radius: var(--sf2-radius); box-shadow: 0 0 0 1px rgba(38,56,50,.025); }
+.app-shell-v2 .content :where(.panel-heading,.data-panel>header,[class$="-heading"],[class$="-head"]){ padding: 13px 16px; border-color: var(--sf2-line); }
+.app-shell-v2 .content :where(.panel-heading,.data-panel>header,[class$="-heading"],[class$="-head"]) h2 { font-size: 14px!important; font-weight: 600; line-height: 1.25; }
+.app-shell-v2 .content :where(.panel-heading,.data-panel>header,[class$="-heading"],[class$="-head"]) p { font-size: 11px!important; line-height: 1.35; color: var(--sf2-mute); }
+.app-shell-v2 .content :where(input,select,textarea){ min-height: 36px; border-radius: 8px; font-size: 13px!important; line-height: 1.3; }
+.app-shell-v2 .content button:not(.icon-button):not(.row-action){ min-height: 36px; border-radius: 8px; font-size: 12px!important; line-height: 1.25; }
+.app-shell-v2 .content :where(.primary-button,.secondary-button,.ghost-button){ height: 36px; min-height: 36px; padding-inline: 12px; }
+.app-shell-v2 .content :where(.badge,[class$="-status"],[class*="-status "]){ padding: 3px 7px; border-radius: 999px; font-size: 11px!important; font-weight: 500; line-height: 1.25; }
+.app-shell-v2 .content :where(.table-wrap,.admin-table){ max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
+.app-shell-v2 .content table th { padding-block: 8px; font-size: 10px!important; font-weight: 600; line-height: 1.3; letter-spacing: .06em; }
+.app-shell-v2 .content table td { padding-block: 10px; font-size: 12px!important; line-height: 1.35; }
+.app-shell-v2 .content table td :where(strong,b){ font-size: 12px!important; font-weight: 500; }
+.app-shell-v2 .content table td small { font-size: 10px!important; line-height: 1.3; }
+.app-shell-v2 .content :where(.tabular-nums,[class*="amount"],[class*="total"],[class*="price"],[class*="cost"]){ font-family: var(--font-jetbrains-mono),ui-monospace,monospace; font-variant-numeric: tabular-nums; }
+.app-shell-v2 .content :where(.empty-state,.io-state,.mp-state,.budget-api-state,.auth-loading){ min-height: 180px; padding: 24px; }
+.app-shell-v2 :where(.modal,.admin-dialog,.md-modal,[class$="-modal"],[class$="-drawer"]){ max-height: min(90dvh,900px); }
+.app-shell-v2 :where(button,input,select,textarea,a):focus-visible { outline: 2px solid rgba(112,118,75,.55); outline-offset: 2px; }
+@media(max-width:760px){.app-shell-v2 .content :where(.panel-heading,.data-panel>header,[class$="-heading"],[class$="-head"]){align-items:flex-start;flex-wrap:wrap}.app-shell-v2 .content :where(.data-toolbar,[class$="-toolbar"]){align-items:stretch;flex-wrap:wrap}.app-shell-v2 .content :where(.data-toolbar,[class$="-toolbar"]) :where(input,select){min-width:0;max-width:none;width:100%}}
+
+/* Phase 2 page headers, dashboard, POS and KDS presentation. */
+.app-shell-v2 .page-heading{align-items:center;margin-bottom:20px}.app-shell-v2 .page-heading h1{margin-bottom:5px;font-size:24px!important;font-weight:600;line-height:1.2;letter-spacing:-.025em}.app-shell-v2 .page-heading>div>p:last-child{font-size:13px!important;line-height:1.4}.app-shell-v2 .breadcrumb{margin-bottom:5px!important;font-size:10px!important;letter-spacing:.08em}.app-shell-v2 .stats-grid{gap:12px;margin-bottom:16px}.app-shell-v2 .stats-grid .stat-card{min-height:82px;padding:14px}.app-shell-v2 .stats-grid .stat-card strong{font:600 20px/1.2 var(--font-jetbrains-mono),ui-monospace,monospace!important;letter-spacing:-.02em}.app-shell-v2 .stats-grid .stat-card span{font-size:12px!important}.app-shell-v2 .stats-grid .stat-card small{font-size:10px!important}.app-shell-v2 .dashboard-grid{grid-template-columns:minmax(0,1.9fr) minmax(250px,1fr);gap:16px}.app-shell-v2 .attention-list,.app-shell-v2 .supplier-bars{padding:10px 16px}.app-shell-v2 .attention-item{padding:10px 0}.app-shell-v2 .kds-board{gap:16px}.app-shell-v2 .kds-column-title{font-size:12px!important}.app-shell-v2 .kds-card{padding:14px;border-radius:14px}.app-shell-v2 .kds-card strong,.app-shell-v2 .kds-card b{font-family:var(--font-jetbrains-mono),ui-monospace,monospace}.app-shell-v2 .pos-workspace{border-radius:14px}.app-shell-v2 .pos-tabs{padding:4px 12px 0}.app-shell-v2 .pos-tabs button{min-height:32px;padding:7px 10px}.app-shell-v2 .pos-terminal-grid{grid-template-columns:minmax(0,1.6fr) minmax(320px,1fr)}.app-shell-v2 .pos-menu-grid{gap:12px}.app-shell-v2 .pos-menu-card{min-height:98px;padding:12px;border-radius:12px}.app-shell-v2 .pos-menu-info b,.app-shell-v2 .cart-totals strong,.app-shell-v2 .transaction-summary strong{font-family:var(--font-jetbrains-mono),ui-monospace,monospace}.app-shell-v2 .cart-heading,.app-shell-v2 .cart-actions{padding:13px 16px}.app-shell-v2 .transaction-summary{gap:12px}.app-shell-v2 .shift-grid{gap:16px}
+@media(max-width:1180px){.app-shell-v2 .dashboard-grid{grid-template-columns:1fr}.app-shell-v2 .pos-terminal-grid{grid-template-columns:1fr}.app-shell-v2 .pos-cart-panel{border-top:1px solid var(--sf2-line)}}
+@media(max-width:760px){.app-shell-v2 .page-heading{align-items:flex-start}.app-shell-v2 .page-heading h1{font-size:24px!important}.app-shell-v2 .stats-grid{grid-template-columns:1fr}.app-shell-v2 .pos-menu-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:420px){.app-shell-v2 .pos-menu-grid{grid-template-columns:1fr}}

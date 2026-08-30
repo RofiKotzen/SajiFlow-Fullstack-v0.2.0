@@ -300,3 +300,7 @@
     display: none;
   }
 }
+
+/* Phase 2 Lovable calibration. */
+.app-shell-v2 .mp-page{display:grid;gap:16px}.app-shell-v2 .mp-summary{gap:12px;margin:0}.app-shell-v2 .mp-summary article{min-height:80px;padding:14px;border-radius:14px;background:var(--sf2-card)}.app-shell-v2 .mp-summary strong{font:600 20px/1.2 var(--font-jetbrains-mono),ui-monospace,monospace!important}.app-shell-v2 .mp-toolbar{gap:8px;padding:12px 16px}.app-shell-v2 .mp-table{min-width:820px}.app-shell-v2 .mp-table td:first-child small,.app-shell-v2 .mp-table td:nth-child(n+4):nth-child(-n+6){font-family:var(--font-jetbrains-mono),ui-monospace,monospace}.app-shell-v2 .mp-modal{border-radius:16px;background:var(--sf2-card)}.app-shell-v2 .mp-modal header{padding:15px 18px}.app-shell-v2 .mp-form{gap:12px;padding:18px}.app-shell-v2 .mp-variant-card,.app-shell-v2 .mp-price-card{padding:13px;border-radius:12px;background:var(--sf2-cream)}
+.app-shell-v2 .menu-products{display:grid;gap:16px}

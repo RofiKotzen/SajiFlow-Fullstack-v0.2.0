@@ -22,3 +22,6 @@
   font-size: 11px !important;
   line-height: 1.4 !important;
 }
+
+/* Phase 2 Lovable calibration. */
+.app-shell-v2 .gr-stats{gap:12px}.app-shell-v2 .gr-stats .stat-card{min-height:80px;padding:14px}.app-shell-v2 .gr-stats strong{font:600 20px/1.2 var(--font-jetbrains-mono),ui-monospace,monospace!important}.app-shell-v2 .gr-heading{padding:13px 16px}.app-shell-v2 .gr-toolbar{gap:8px;padding:12px 16px}.app-shell-v2 .gr-table{min-width:880px}.app-shell-v2 .gr-table td:first-child,.app-shell-v2 .gr-table td:nth-child(n+4):nth-child(-n+7){font-family:var(--font-jetbrains-mono),ui-monospace,monospace}.app-shell-v2 .gr-editor-grid,.app-shell-v2 .gr-bottom-grid{gap:16px}.app-shell-v2 .gr-form-card form{gap:12px;padding:16px}.app-shell-v2 .gr-detail-hero{border-radius:14px}.app-shell-v2 .gr-detail-items table{min-width:900px}.app-shell-v2 .gr-dialog{border-radius:16px;background:var(--sf2-card)}
