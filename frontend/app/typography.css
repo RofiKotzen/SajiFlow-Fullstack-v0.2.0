@@ -6,21 +6,86 @@
   --type-section: 18px;
   --type-line-body: 1.5;
   --type-line-compact: 1.35;
+  --type-family-body:
+    var(--font-inter), Inter, "Segoe UI", Arial, sans-serif;
+  --type-family-display: var(--type-family-body);
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--type-family-body);
+}
+
+:where(h1, h2, h3, h4, h5, h6, .brand strong) {
+  font-family: var(--type-family-display);
+  font-weight: 600;
+  letter-spacing: -0.018em;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Reusable for operational values without changing surrounding prose. */
+.tabular-nums,
+:where(
+    table,
+    .date-chip,
+    .stat-card strong,
+    [class*="clock"],
+    [class*="timer"],
+    [class*="total"],
+    [class*="amount"],
+    [class*="price"],
+    [class*="stock"]
+  ) {
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
 /* Shared readable baseline for every connected Saji Flow surface. */
-:where(.app-shell, .login-shell, .modal-backdrop, .admin-dialog-backdrop, .md-modal) {
+:where(
+  .app-shell,
+  .login-shell,
+  .modal-backdrop,
+  .admin-dialog-backdrop,
+  .md-modal
+) {
   font-size: var(--type-body);
   line-height: var(--type-line-body);
 }
 
-:where(.content, .sidebar, .topbar, .login-shell, .modal, .admin-dialog, .md-modal) :where(input, select, textarea) {
+:where(
+    .content,
+    .sidebar,
+    .topbar,
+    .login-shell,
+    .modal,
+    .admin-dialog,
+    .md-modal
+  )
+  :where(input, select, textarea) {
   font-size: var(--type-control) !important;
   line-height: var(--type-line-compact);
   min-height: 42px;
 }
 
-:where(.content, .sidebar, .topbar, .login-shell, .modal, .admin-dialog, .md-modal) button:not(.icon-button):not(.row-action) {
+:where(
+    .content,
+    .sidebar,
+    .topbar,
+    .login-shell,
+    .modal,
+    .admin-dialog,
+    .md-modal
+  )
+  button:not(.icon-button):not(.row-action) {
   font-size: var(--type-control) !important;
   line-height: var(--type-line-compact);
   min-height: 40px;
@@ -31,25 +96,32 @@
   line-height: var(--type-line-body);
 }
 
-:where(.content, .modal, .admin-dialog, .md-modal) :where(section, article, div) > :where(strong, b) {
+:where(.content, .modal, .admin-dialog, .md-modal)
+  :where(section, article, div)
+  > :where(strong, b) {
   font-size: var(--type-body) !important;
   line-height: var(--type-line-compact);
 }
 
-:where(.content, .modal, .admin-dialog, .md-modal) :where(section, article, div) > span:not([aria-hidden="true"]) {
+:where(.content, .modal, .admin-dialog, .md-modal)
+  :where(section, article, div)
+  > span:not([aria-hidden="true"]) {
   font-size: var(--type-label) !important;
   line-height: var(--type-line-compact);
 }
 
-:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(label, legend),
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal)
+  :where(label, legend),
 :where(.content, .modal, .admin-dialog, .md-modal) [class*="-tabs"] button,
 :where(.content, .modal, .admin-dialog, .md-modal) [class*="-toolbar"] label {
   font-size: var(--type-label) !important;
   line-height: var(--type-line-compact);
 }
 
-:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(small, code),
-:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(.eyebrow, .breadcrumb),
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal)
+  :where(small, code),
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal)
+  :where(.eyebrow, .breadcrumb),
 :where(.content, .modal, .admin-dialog, .md-modal) [class*="-meta"] {
   font-size: var(--type-meta) !important;
   line-height: var(--type-line-compact);
@@ -91,71 +163,81 @@
 }
 
 /* Shared chips, filters, statuses, and badges. */
-:where(.content, .modal, .admin-dialog, .md-modal) :where(
-  .badge,
-  .small-tag,
-  .coverage-chip,
-  .shift-chip,
-  .cart-count,
-  [class$="-status"],
-  [class*="-status "],
-  [class$="-type"],
-  [class*="-type "]
-) {
+:where(.content, .modal, .admin-dialog, .md-modal)
+  :where(
+    .badge,
+    .small-tag,
+    .coverage-chip,
+    .shift-chip,
+    .cart-count,
+    [class$="-status"],
+    [class*="-status "],
+    [class$="-type"],
+    [class*="-type "]
+  ) {
   font-size: var(--type-label) !important;
   line-height: var(--type-line-compact);
 }
 
 /* Card and list values remain visually stronger than their metadata. */
-:where(.content, .login-shell, .modal, .admin-dialog, .md-modal) :where(
-  .panel-heading,
-  .po-list-heading,
-  .io-panel-heading,
-  .subpanel-heading,
-  .cart-heading,
-  .shift-section-head,
-  .mode-heading
-) h2,
-:where(.content, .modal, .admin-dialog, .md-modal) :where(article, .panel, .data-panel) > header h3 {
+:where(.content, .login-shell, .modal, .admin-dialog, .md-modal)
+  :where(
+    .panel-heading,
+    .po-list-heading,
+    .io-panel-heading,
+    .subpanel-heading,
+    .cart-heading,
+    .shift-section-head,
+    .mode-heading
+  )
+  h2,
+:where(.content, .modal, .admin-dialog, .md-modal)
+  :where(article, .panel, .data-panel)
+  > header
+  h3 {
   font-size: var(--type-section) !important;
 }
 
-:where(.content, .modal, .admin-dialog, .md-modal) :where(
-  .stat-card,
-  .attention-item,
-  .receipt-main,
-  .supplier-main,
-  .po-history-list,
-  .io-ledger,
-  .inventory-alerts,
-  .movement-list,
-  .transfer-list,
-  .waste-list,
-  .cart-items,
-  .active-order-card,
-  .sales-detail-items,
-  .permission-groups
-) strong {
+:where(.content, .modal, .admin-dialog, .md-modal)
+  :where(
+    .stat-card,
+    .attention-item,
+    .receipt-main,
+    .supplier-main,
+    .po-history-list,
+    .io-ledger,
+    .inventory-alerts,
+    .movement-list,
+    .transfer-list,
+    .waste-list,
+    .cart-items,
+    .active-order-card,
+    .sales-detail-items,
+    .permission-groups
+  )
+  strong {
   font-size: var(--type-control) !important;
   line-height: var(--type-line-compact);
 }
 
-:where(.content, .modal, .admin-dialog, .md-modal) :where(
-  .stat-card,
-  .attention-item,
-  .receipt-main,
-  .supplier-main,
-  .po-history-list,
-  .io-ledger,
-  .inventory-alerts,
-  .movement-list,
-  .transfer-list,
-  .waste-list,
-  .cart-items,
-  .active-order-card,
-  .sales-detail-items,
-  .permission-groups
-) small {
+:where(.content, .modal, .admin-dialog, .md-modal)
+  :where(
+    .stat-card,
+    .attention-item,
+    .receipt-main,
+    .supplier-main,
+    .po-history-list,
+    .io-ledger,
+    .inventory-alerts,
+    .movement-list,
+    .transfer-list,
+    .waste-list,
+    .cart-items,
+    .active-order-card,
+    .sales-detail-items,
+    .permission-groups
+  )
+  small {
   font-size: var(--type-meta) !important;
   line-height: var(--type-line-compact);
 }
@@ -213,12 +295,151 @@
   font-size: 20px !important;
 }
 
+/* Consistent spacing between application components and action groups. */
+.content {
+  --surface-gap: 20px;
+}
+
+.content > :where(section, div) + :where(section, div),
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where(.panel, .data-panel, form, [class$="-list"], [class$="-grid"])
+  + :where(.panel, .data-panel, form, [class$="-list"], [class$="-grid"]) {
+  margin-top: var(--surface-gap, 18px);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where(
+    [class$="-actions"],
+    [class$="-toolbar"],
+    [class$="-footer"],
+    [class$="-controls"],
+    .panel-heading,
+    .data-toolbar
+  ) {
+  gap: 12px !important;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where(
+    [class$="-actions"],
+    [class$="-toolbar"],
+    [class$="-footer"],
+    [class$="-controls"]
+  ),
+.drawer-footer {
+  flex-wrap: wrap;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  td:last-child
+  > button
+  + button,
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  article
+  > button
+  + button {
+  margin-left: 9px;
+}
+
+/* Every action has a visible, intentional color and a generous hit target. */
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  button:not(.icon-button):not(.row-action):not(.primary-button):not(
+    .secondary-button
+  ):not(.ghost-button):not(.text-button) {
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 1px solid #c9d8d1;
+  border-radius: 10px;
+  background: #edf5f1;
+  color: #205a4d;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(20, 61, 53, 0.07);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  button:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(20, 61, 53, 0.13);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  button:focus-visible {
+  outline: 3px solid rgba(200, 151, 76, 0.3);
+  outline-offset: 2px;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal) button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+  transform: none;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #143d35, #236859) !important;
+  color: #fff !important;
+  border: 1px solid #143d35 !important;
+}
+
+.secondary-button {
+  background: #fff5e4 !important;
+  color: #82571d !important;
+  border: 1px solid #e5c58f !important;
+}
+
+.ghost-button {
+  background: #f0eef7 !important;
+  color: #625579 !important;
+  border: 1px solid #d9d3e6 !important;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where([class*="danger"], [class*="void"], [class*="delete"])
+  button,
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  button[class*="danger"] {
+  background: #fff0ed !important;
+  color: #a34436 !important;
+  border-color: #efb8ae !important;
+}
+
+/* Inputs and cards share the same visual rhythm. */
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where(input, select, textarea) {
+  border-radius: 10px !important;
+  padding-inline: 13px;
+  border-color: #d6ddd8 !important;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where(input, select, textarea):focus {
+  outline: none;
+  border-color: #4a8c79 !important;
+  box-shadow: 0 0 0 3px rgba(74, 140, 121, 0.13);
+}
+
+:where(.content, .modal, .admin-dialog, .md-modal, .mp-modal)
+  :where(.panel, .data-panel, article, [class$="-card"]) {
+  line-height: var(--type-line-body);
+}
+
 @media (max-width: 1100px) {
   :where(.content, .modal, .admin-dialog, .md-modal) [class*="-toolbar"] {
     align-items: stretch;
   }
 
-  :where(.content, .modal, .admin-dialog, .md-modal) [class*="-toolbar"] :where(input, select, button) {
+  :where(.content, .modal, .admin-dialog, .md-modal)
+    [class*="-toolbar"]
+    :where(input, select, button) {
     min-width: 0;
     width: 100%;
   }
@@ -241,7 +462,8 @@
     font-size: 26px !important;
   }
 
-  :where(.content, .modal, .admin-dialog, .md-modal) :where(.table-wrap, [class$="-list"], [class$="-ledger"]) {
+  :where(.content, .modal, .admin-dialog, .md-modal)
+    :where(.table-wrap, [class$="-list"], [class$="-ledger"]) {
     overflow-x: auto;
     overscroll-behavior-inline: contain;
   }
@@ -250,7 +472,8 @@
     min-width: 760px;
   }
 
-  :where(.content, .modal, .admin-dialog, .md-modal) :where(button, .badge, [class$="-status"]) {
+  :where(.content, .modal, .admin-dialog, .md-modal)
+    :where(button, .badge, [class$="-status"]) {
     white-space: normal;
   }
 }

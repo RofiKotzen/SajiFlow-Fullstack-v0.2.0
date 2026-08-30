@@ -509,16 +509,31 @@ export const supplierIngredients = pgTable(
   ],
 );
 
-export const menuCategories = pgTable("menu_categories", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  tenantId: uuid("tenant_id").notNull(),
-  name: varchar("name", { length: 100 }).notNull(),
-  displayOrder: integer("display_order").notNull().default(0),
-  isActive: boolean("is_active").notNull().default(true),
-  ...auditColumns,
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-  deletedBy: uuid("deleted_by"),
-});
+export const menuCategories = pgTable(
+  "menu_categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    code: varchar("code", { length: 40 }).notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    displayOrder: integer("display_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by"),
+    archiveReason: text("archive_reason"),
+    lockVersion: integer("lock_version").notNull().default(1),
+    ...auditColumns,
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedBy: uuid("deleted_by"),
+  },
+  (table) => [
+    index("ix_menu_categories_tenant_active_order").on(
+      table.tenantId,
+      table.isActive,
+      table.displayOrder,
+    ),
+  ],
+);
 
 export const menus = pgTable(
   "menus",
@@ -533,6 +548,10 @@ export const menus = pgTable(
     taxProfileId: uuid("tax_profile_id"),
     serviceChargeProfileId: uuid("service_charge_profile_id"),
     isActive: boolean("is_active").notNull().default(true),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by"),
+    archiveReason: text("archive_reason"),
+    lockVersion: integer("lock_version").notNull().default(1),
     ...auditColumns,
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by"),
@@ -550,14 +569,49 @@ export const menuVariants = pgTable(
     code: varchar("code", { length: 40 }).notNull(),
     name: varchar("name", { length: 100 }).notNull(),
     sellingPrice: numeric("selling_price", { precision: 18, scale: 2 }),
+    currencyCode: char("currency_code", { length: 3 }).notNull(),
     barcode: varchar("barcode", { length: 100 }),
     isDefault: boolean("is_default").notNull().default(false),
+    displayOrder: integer("display_order").notNull().default(0),
+    requiresRecipe: boolean("requires_recipe").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    archivedBy: uuid("archived_by"),
+    archiveReason: text("archive_reason"),
+    lockVersion: integer("lock_version").notNull().default(1),
     ...auditColumns,
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletedBy: uuid("deleted_by"),
   },
   (table) => [index("ix_menu_variants_tenant_id").on(table.tenantId)],
+);
+
+export const menuVariantOutletSettings = pgTable(
+  "menu_variant_outlet_settings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    menuVariantId: uuid("menu_variant_id").notNull(),
+    isAvailable: boolean("is_available").notNull().default(true),
+    priceOverride: numeric("price_override", { precision: 18, scale: 2 }),
+    isActive: boolean("is_active").notNull().default(true),
+    lockVersion: integer("lock_version").notNull().default(1),
+    ...auditColumns,
+  },
+  (table) => [
+    uniqueIndex("uq_menu_variant_outlet_setting").on(
+      table.tenantId,
+      table.outletId,
+      table.menuVariantId,
+    ),
+    index("ix_menu_variant_outlet_lookup").on(
+      table.tenantId,
+      table.outletId,
+      table.isActive,
+      table.isAvailable,
+    ),
+  ],
 );
 
 export const recipeHeaders = pgTable(
@@ -577,7 +631,10 @@ export const recipeHeaders = pgTable(
   },
   (table) => [
     uniqueIndex("uq_recipe_headers_tenant_code").on(table.tenantId, table.code),
-    uniqueIndex("uq_recipe_headers_tenant_variant").on(table.tenantId, table.menuVariantId),
+    uniqueIndex("uq_recipe_headers_tenant_variant").on(
+      table.tenantId,
+      table.menuVariantId,
+    ),
   ],
 );
 
@@ -591,10 +648,15 @@ export const recipes = pgTable(
     versionNo: integer("version_no").notNull(),
     yieldQty: numeric("yield_qty", { precision: 18, scale: 3 }).notNull(),
     yieldUnitId: uuid("yield_unit_id"),
-    servingCount: numeric("serving_count", { precision: 18, scale: 3 }).notNull(),
+    servingCount: numeric("serving_count", {
+      precision: 18,
+      scale: 3,
+    }).notNull(),
     servingSize: numeric("serving_size", { precision: 18, scale: 3 }).notNull(),
     servingUnitId: uuid("serving_unit_id"),
-    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull().defaultNow(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     effectiveUntil: timestamp("effective_until", { withTimezone: true }),
     status: recipeStatus("status").notNull().default("draft"),
     notes: text("notes"),
@@ -606,14 +668,23 @@ export const recipes = pgTable(
     approvedOutletId: uuid("approved_outlet_id"),
     approvedCostingRunId: uuid("approved_costing_run_id"),
     costingComplete: boolean("costing_complete").notNull().default(false),
-    costingCalculatedAt: timestamp("costing_calculated_at", { withTimezone: true }),
+    costingCalculatedAt: timestamp("costing_calculated_at", {
+      withTimezone: true,
+    }),
     isLegacy: boolean("is_legacy").notNull().default(false),
     lockVersion: integer("lock_version").notNull().default(1),
     ...auditColumns,
   },
   (table) => [
-    uniqueIndex("uq_recipe_header_version").on(table.recipeHeaderId, table.versionNo),
-    index("ix_recipes_tenant_header_status").on(table.tenantId, table.recipeHeaderId, table.status),
+    uniqueIndex("uq_recipe_header_version").on(
+      table.recipeHeaderId,
+      table.versionNo,
+    ),
+    index("ix_recipes_tenant_header_status").on(
+      table.tenantId,
+      table.recipeHeaderId,
+      table.status,
+    ),
   ],
 );
 
@@ -627,14 +698,25 @@ export const recipeItems = pgTable(
     ingredientId: uuid("ingredient_id").notNull(),
     quantity: numeric("quantity", { precision: 18, scale: 3 }).notNull(),
     unitId: uuid("unit_id").notNull(),
-    wastePercentage: numeric("waste_percentage", { precision: 5, scale: 2 }).notNull(),
+    wastePercentage: numeric("waste_percentage", {
+      precision: 5,
+      scale: 2,
+    }).notNull(),
     netQuantity: numeric("net_quantity", { precision: 18, scale: 6 }).notNull(),
-    grossQuantity: numeric("gross_quantity", { precision: 18, scale: 6 }).notNull(),
-    conversionToBase: numeric("conversion_to_base", { precision: 18, scale: 9 }),
+    grossQuantity: numeric("gross_quantity", {
+      precision: 18,
+      scale: 6,
+    }).notNull(),
+    conversionToBase: numeric("conversion_to_base", {
+      precision: 18,
+      scale: 9,
+    }),
     baseQuantity: numeric("base_quantity", { precision: 18, scale: 6 }),
     isOptional: boolean("is_optional").notNull().default(false),
     ingredientSkuSnapshot: varchar("ingredient_sku_snapshot", { length: 50 }),
-    ingredientNameSnapshot: varchar("ingredient_name_snapshot", { length: 150 }),
+    ingredientNameSnapshot: varchar("ingredient_name_snapshot", {
+      length: 150,
+    }),
     unitCodeSnapshot: varchar("unit_code_snapshot", { length: 20 }),
     unitNameSnapshot: varchar("unit_name_snapshot", { length: 80 }),
     unitDimensionSnapshot: unitDimension("unit_dimension_snapshot"),
@@ -642,7 +724,9 @@ export const recipeItems = pgTable(
     baseUnitNameSnapshot: varchar("base_unit_name_snapshot", { length: 80 }),
     ...auditColumns,
   },
-  (table) => [uniqueIndex("uq_recipe_item_line").on(table.recipeId, table.lineNo)],
+  (table) => [
+    uniqueIndex("uq_recipe_item_line").on(table.recipeId, table.lineNo),
+  ],
 );
 
 export const recipeCostingRuns = pgTable(
@@ -655,20 +739,42 @@ export const recipeCostingRuns = pgTable(
     runType: varchar("run_type", { length: 24 }).notNull(),
     status: varchar("status", { length: 16 }).notNull(),
     currencyCode: char("currency_code", { length: 3 }).notNull(),
-    sellingPriceSnapshot: numeric("selling_price_snapshot", { precision: 18, scale: 2 }),
+    sellingPriceSnapshot: numeric("selling_price_snapshot", {
+      precision: 18,
+      scale: 2,
+    }),
     totalRecipeCost: numeric("total_recipe_cost", { precision: 18, scale: 2 }),
     costPerYield: numeric("cost_per_yield", { precision: 18, scale: 6 }),
     costPerServing: numeric("cost_per_serving", { precision: 18, scale: 2 }),
-    foodCostPercentage: numeric("food_cost_percentage", { precision: 9, scale: 4 }),
+    foodCostPercentage: numeric("food_cost_percentage", {
+      precision: 9,
+      scale: 4,
+    }),
     grossProfit: numeric("gross_profit", { precision: 18, scale: 2 }),
-    grossMarginPercentage: numeric("gross_margin_percentage", { precision: 9, scale: 4 }),
+    grossMarginPercentage: numeric("gross_margin_percentage", {
+      precision: 9,
+      scale: 4,
+    }),
     warningCodes: jsonb("warning_codes").notNull().default([]),
-    calculatedAt: timestamp("calculated_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceVersionAt: timestamp("source_version_at", { withTimezone: true }).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    calculatedAt: timestamp("calculated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    sourceVersionAt: timestamp("source_version_at", {
+      withTimezone: true,
+    }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     createdBy: uuid("created_by"),
   },
-  (table) => [index("ix_recipe_costing_lookup").on(table.tenantId, table.recipeId, table.outletId, table.calculatedAt)],
+  (table) => [
+    index("ix_recipe_costing_lookup").on(
+      table.tenantId,
+      table.recipeId,
+      table.outletId,
+      table.calculatedAt,
+    ),
+  ],
 );
 
 export const recipeCostingLines = pgTable(
@@ -680,15 +786,33 @@ export const recipeCostingLines = pgTable(
     recipeItemId: uuid("recipe_item_id").notNull(),
     ingredientId: uuid("ingredient_id").notNull(),
     lineNo: integer("line_no").notNull(),
-    ingredientSkuSnapshot: varchar("ingredient_sku_snapshot", { length: 50 }).notNull(),
-    ingredientNameSnapshot: varchar("ingredient_name_snapshot", { length: 150 }).notNull(),
+    ingredientSkuSnapshot: varchar("ingredient_sku_snapshot", {
+      length: 50,
+    }).notNull(),
+    ingredientNameSnapshot: varchar("ingredient_name_snapshot", {
+      length: 150,
+    }).notNull(),
     unitCodeSnapshot: varchar("unit_code_snapshot", { length: 20 }).notNull(),
-    baseUnitCodeSnapshot: varchar("base_unit_code_snapshot", { length: 20 }).notNull(),
+    baseUnitCodeSnapshot: varchar("base_unit_code_snapshot", {
+      length: 20,
+    }).notNull(),
     netQuantity: numeric("net_quantity", { precision: 18, scale: 6 }).notNull(),
-    wastePercentage: numeric("waste_percentage", { precision: 5, scale: 2 }).notNull(),
-    grossQuantity: numeric("gross_quantity", { precision: 18, scale: 6 }).notNull(),
-    conversionToBase: numeric("conversion_to_base", { precision: 18, scale: 9 }).notNull(),
-    baseQuantity: numeric("base_quantity", { precision: 18, scale: 6 }).notNull(),
+    wastePercentage: numeric("waste_percentage", {
+      precision: 5,
+      scale: 2,
+    }).notNull(),
+    grossQuantity: numeric("gross_quantity", {
+      precision: 18,
+      scale: 6,
+    }).notNull(),
+    conversionToBase: numeric("conversion_to_base", {
+      precision: 18,
+      scale: 9,
+    }).notNull(),
+    baseQuantity: numeric("base_quantity", {
+      precision: 18,
+      scale: 6,
+    }).notNull(),
     costSource: varchar("cost_source", { length: 32 }).notNull(),
     costPerBaseUnit: numeric("cost_per_base_unit", { precision: 18, scale: 6 }),
     totalCost: numeric("total_cost", { precision: 18, scale: 2 }),
@@ -698,9 +822,16 @@ export const recipeCostingLines = pgTable(
     supplierCatalogId: uuid("supplier_catalog_id"),
     supplierSourceAt: timestamp("supplier_source_at", { withTimezone: true }),
     warningCode: varchar("warning_code", { length: 80 }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (table) => [uniqueIndex("uq_recipe_costing_line").on(table.costingRunId, table.recipeItemId)],
+  (table) => [
+    uniqueIndex("uq_recipe_costing_line").on(
+      table.costingRunId,
+      table.recipeItemId,
+    ),
+  ],
 );
 
 export const budgets = pgTable(

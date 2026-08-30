@@ -3,52 +3,898 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiClient, AuthSession } from "./sajiflow-api";
 import "./recipe-food-cost.css";
 
-type Row = { id:string; code:string; name:string; isArchived:boolean; menuName:string; variantName:string; versionId:string|null; versionNo:number|null; status:string|null; costingComplete:boolean|null; approvedOutletName:string|null; calculatedAt:string|null; totalRecipeCost?:string; costPerServing?:string; foodCostPercentage?:string; grossProfit?:string; grossMarginPercentage?:string };
-type Lookups = { menuVariants:{id:string;code:string;name:string;menuName:string;outletId:string|null}[]; ingredients:{id:string;sku:string;name:string;baseUnitId:string;baseUnitCode:string;dimension:string}[]; units:{id:string;code:string;name:string;dimension:string}[]; outlets:{id:string;code:string;name:string}[] };
-type RecipeVersion = { id:string;versionNo:number;status:string;approvedOutletId:string|null };
-type CostLine = { id:string;ingredientNameSnapshot:string;ingredientSkuSnapshot:string;netQuantity:string;wastePercentage:string;grossQuantity:string;baseQuantity:string;baseUnitCodeSnapshot:string;costSource:string;warningCode:string|null;inventorySourceAt:string|null;supplierSourceAt:string|null;costPerBaseUnit?:string|null;totalCost?:string|null };
-type Costing = { status:string;calculatedAt:string;isStale:boolean;staleSources:string[];totalRecipeCost?:string|null;costPerServing?:string|null;foodCostPercentage?:string|null;grossProfit?:string|null;grossMarginPercentage?:string|null;lines:CostLine[] };
+type Row = {
+  id: string;
+  code: string;
+  name: string;
+  isArchived: boolean;
+  menuName: string;
+  variantName: string;
+  versionId: string | null;
+  versionNo: number | null;
+  status: string | null;
+  costingComplete: boolean | null;
+  approvedOutletName: string | null;
+  calculatedAt: string | null;
+  totalRecipeCost?: string;
+  costPerServing?: string;
+  foodCostPercentage?: string;
+  grossProfit?: string;
+  grossMarginPercentage?: string;
+};
+type Lookups = {
+  menuVariants: never[];
+  ingredients: {
+    id: string;
+    sku: string;
+    name: string;
+    baseUnitId: string;
+    baseUnitCode: string;
+    dimension: string;
+  }[];
+  units: { id: string; code: string; name: string; dimension: string }[];
+  outlets: { id: string; code: string; name: string }[];
+};
+type RecipeCandidate = {
+  menuId: string;
+  menuCode: string;
+  menuName: string;
+  variantId: string | null;
+  variantSku: string | null;
+  variantName: string | null;
+  recipeHeaderId: string | null;
+  eligible: boolean;
+  reasons: string[];
+  effectiveSellingPrice?: string | null;
+  currencyCode?: string | null;
+};
+type RecipeVersion = {
+  id: string;
+  versionNo: number;
+  status: string;
+  approvedOutletId: string | null;
+};
+type CostLine = {
+  id: string;
+  ingredientNameSnapshot: string;
+  ingredientSkuSnapshot: string;
+  netQuantity: string;
+  wastePercentage: string;
+  grossQuantity: string;
+  baseQuantity: string;
+  baseUnitCodeSnapshot: string;
+  costSource: string;
+  warningCode: string | null;
+  inventorySourceAt: string | null;
+  supplierSourceAt: string | null;
+  costPerBaseUnit?: string | null;
+  totalCost?: string | null;
+};
+type Costing = {
+  status: string;
+  calculatedAt: string;
+  isStale: boolean;
+  staleSources: string[];
+  totalRecipeCost?: string | null;
+  costPerServing?: string | null;
+  foodCostPercentage?: string | null;
+  grossProfit?: string | null;
+  grossMarginPercentage?: string | null;
+  lines: CostLine[];
+};
 type RecipeLineForm = typeof blankLine;
-type RecipeForm = { code:string;name:string;menuVariantId:string;yieldQuantity:string;yieldUnitId:string;servingCount:string;servingSize:string;servingUnitId:string;notes:string;productionInstructions:string;items:RecipeLineForm[] };
-type Detail = { header:{id:string;code:string;name:string;isArchived:boolean}; variant:{outletId:string|null}; selectedVersion:RecipeVersion|null; versions:RecipeVersion[]; items:{item:Record<string,unknown>;ingredientName:string;ingredientSku:string;unitCode:string;baseUnitCode:string}[]; costing:Costing|null };
-const blankLine = { ingredientId:"", unitId:"", netQuantity:"1.000000", wastePercentage:"0.00", isOptional:false };
+type RecipeForm = {
+  code: string;
+  name: string;
+  menuVariantId: string;
+  yieldQuantity: string;
+  yieldUnitId: string;
+  servingCount: string;
+  servingSize: string;
+  servingUnitId: string;
+  notes: string;
+  productionInstructions: string;
+  items: RecipeLineForm[];
+};
+type Detail = {
+  header: { id: string; code: string; name: string; isArchived: boolean };
+  variant: { outletId: string | null };
+  selectedVersion: RecipeVersion | null;
+  versions: RecipeVersion[];
+  items: {
+    item: Record<string, unknown>;
+    ingredientName: string;
+    ingredientSku: string;
+    unitCode: string;
+    baseUnitCode: string;
+  }[];
+  costing: Costing | null;
+};
+const blankLine = {
+  ingredientId: "",
+  unitId: "",
+  netQuantity: "1.000000",
+  wastePercentage: "0.00",
+  isOptional: false,
+};
 
-export function ConnectedRecipeFoodCost({session,api,onNotify}:{session:AuthSession;api:ApiClient;onNotify:(message:string)=>void}) {
-  const can=(p:string)=>session.user.permissions.includes(p), canRead=can("recipes.read"), canCost=can("recipes.cost.read");
-  const [rows,setRows]=useState<Row[]>([]),[lookups,setLookups]=useState<Lookups>({menuVariants:[],ingredients:[],units:[],outlets:[]}),[query,setQuery]=useState(""),[status,setStatus]=useState(""),[outletId,setOutletId]=useState(""),[loading,setLoading]=useState(true),[error,setError]=useState(""),[detail,setDetail]=useState<Detail|null>(null),[form,setForm]=useState<RecipeForm|null>(null),[saving,setSaving]=useState(false);
-  const load=useCallback(async()=>{if(!canRead)return;setLoading(true);try{const params=new URLSearchParams();if(status)params.set("status",status);if(outletId)params.set("outletId",outletId);const [data,refs]=await Promise.all([api<Row[]>(`/recipes?${params}`),api<Lookups>("/recipes/lookups")]);setRows(data);setLookups(refs);setError("");}catch(e){setError(message(e));}finally{setLoading(false)}},[api,status,outletId,canRead]);
-  useEffect(()=>{const timer=window.setTimeout(()=>void load(),0);return()=>window.clearTimeout(timer)},[load]);
-  const visible=useMemo(()=>rows.filter(r=>`${r.code} ${r.name} ${r.menuName}`.toLowerCase().includes(query.toLowerCase())),[rows,query]);
-  async function open(id:string){try{const suffix=outletId?`?outletId=${outletId}`:"";setDetail(await api<Detail>(`/recipes/${id}${suffix}`));}catch(e){setError(message(e))}}
-  function newRecipe(){setForm({code:"",name:"",menuVariantId:"",yieldQuantity:"1.000",yieldUnitId:"",servingCount:"1.000",servingSize:"1.000",servingUnitId:"",notes:"",productionInstructions:"",items:[{...blankLine}]})}
-  async function submit(e:FormEvent){e.preventDefault();if(!form)return;setSaving(true);try{await api("/recipes",{method:"POST",body:JSON.stringify({...form,yieldUnitId:form.yieldUnitId||undefined,servingUnitId:form.servingUnitId||undefined})});setForm(null);onNotify("Recipe draft berhasil dibuat.");await load()}catch(c){setError(message(c))}finally{setSaving(false)}}
-  async function action(path:string,body?:unknown,success="Recipe diperbarui."){try{await api(path,{method:"POST",body:body?JSON.stringify(body):undefined});onNotify(success);setDetail(null);await load()}catch(e){setError(message(e))}}
-  if(!canRead) return <section className="panel rfc-denied"><h2>Akses recipe diperlukan</h2><p>Hubungi administrator untuk permission recipes.read.</p></section>;
-  return <div className="rfc-shell">
-    {error&&<div className="io-error" role="alert"><span>{error}</span><button onClick={()=>setError("")}>×</button></div>}
-    <section className="rfc-summary">
-      <article><span>Recipe aktif</span><strong>{rows.filter(r=>!r.isArchived).length}</strong></article>
-      <article><span>Approved</span><strong>{rows.filter(r=>r.status==="approved").length}</strong></article>
-      <article><span>Cost lengkap</span><strong>{rows.filter(r=>r.costingComplete).length}</strong></article>
-      <article className="warning"><span>Perlu perhatian</span><strong>{rows.filter(r=>!r.costingComplete).length}</strong></article>
-    </section>
-    <section className="panel rfc-panel">
-      <div className="rfc-toolbar"><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari kode, recipe, atau menu…"/><select value={status} onChange={e=>setStatus(e.target.value)}><option value="">Recipe aktif</option><option value="draft">Draft</option><option value="approved">Approved</option><option value="archived">Archived</option></select><select value={outletId} onChange={e=>setOutletId(e.target.value)}><option value="">Semua outlet</option>{lookups.outlets.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select><button className="primary-button" disabled={!can("recipes.create")} onClick={newRecipe}>+ Recipe</button></div>
-      {loading?<div className="io-loading"><p>Memuat recipe…</p></div>:<div className="table-wrap"><table className="data-table rfc-table"><thead><tr><th>Recipe / Menu</th><th>Version</th><th>Status Cost</th>{canCost&&<><th>Cost / Serving</th><th>Food Cost</th><th>Gross Margin</th></>}<th>Outlet acuan approval</th><th>Dihitung</th><th/></tr></thead><tbody>{visible.map(r=><tr key={r.id}><td><strong>{r.name}</strong><small>{r.code} • {r.menuName} / {r.variantName}</small></td><td>v{r.versionNo??"—"}<small>{r.status??"Belum ada version"}</small></td><td><span className={`rfc-status ${r.costingComplete?"complete":"incomplete"}`}>{r.costingComplete?"Lengkap":"Belum lengkap"}</span></td>{canCost&&<><td>{money(r.costPerServing)}</td><td>{percent(r.foodCostPercentage)}</td><td>{percent(r.grossMarginPercentage)}</td></>}<td>{r.approvedOutletName??"Belum disetujui"}</td><td>{r.calculatedAt?new Date(r.calculatedAt).toLocaleString("id-ID"):"—"}</td><td><button onClick={()=>void open(r.id)}>Detail</button></td></tr>)}</tbody></table>{!visible.length&&<div className="io-empty"><strong>Recipe tidak ditemukan</strong></div>}</div>}
-    </section>
-    {form&&<div className="md-modal" role="dialog" aria-modal="true"><div className="wide"><header><h2>Recipe Draft Baru</h2><button onClick={()=>setForm(null)}>×</button></header><form className="rfc-form" onSubmit={submit}>
-      <label>Kode<input required value={form.code} onChange={e=>setForm({...form,code:e.target.value.toUpperCase()})}/></label><label>Nama<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label className="full">Menu variant<select required value={form.menuVariantId} onChange={e=>setForm({...form,menuVariantId:e.target.value})}><option value="">Pilih menu</option>{lookups.menuVariants.map(v=><option key={v.id} value={v.id}>{v.menuName} — {v.name}{v.outletId?" (outlet-specific)":" (global)"}</option>)}</select></label>
-      <label>Yield quantity<input required inputMode="decimal" value={form.yieldQuantity} onChange={e=>setForm({...form,yieldQuantity:e.target.value})}/></label><label>Yield unit<select value={form.yieldUnitId} onChange={e=>setForm({...form,yieldUnitId:e.target.value})}><option value="">Tanpa unit</option>{lookups.units.map(u=><option key={u.id} value={u.id}>{u.code}</option>)}</select></label><label>Jumlah serving<input required inputMode="decimal" value={form.servingCount} onChange={e=>setForm({...form,servingCount:e.target.value})}/></label><label>Ukuran serving<input required inputMode="decimal" value={form.servingSize} onChange={e=>setForm({...form,servingSize:e.target.value})}/></label>
-      <div className="full rfc-builder"><div className="rfc-builder-head"><h3>Ingredient lines</h3><button type="button" onClick={()=>setForm({...form,items:[...form.items,{...blankLine}]})}>+ Bahan</button></div>{form.items.map((line:RecipeLineForm,index:number)=>{const ing=lookups.ingredients.find(i=>i.id===line.ingredientId);return <div className="rfc-line" key={index}><select required value={line.ingredientId} onChange={e=>{const next=[...form.items];next[index]={...line,ingredientId:e.target.value,unitId:""};setForm({...form,items:next})}}><option value="">Bahan aktif</option>{lookups.ingredients.map(i=><option key={i.id} value={i.id}>{i.sku} — {i.name}</option>)}</select><select required value={line.unitId} onChange={e=>{const next=[...form.items];next[index]={...line,unitId:e.target.value};setForm({...form,items:next})}}><option value="">Satuan</option>{lookups.units.filter(u=>u.dimension===ing?.dimension).map(u=><option key={u.id} value={u.id}>{u.code}</option>)}</select><input required aria-label="Net quantity" value={line.netQuantity} onChange={e=>{const next=[...form.items];next[index]={...line,netQuantity:e.target.value};setForm({...form,items:next})}}/><input required aria-label="Waste percentage" value={line.wastePercentage} onChange={e=>{const next=[...form.items];next[index]={...line,wastePercentage:e.target.value};setForm({...form,items:next})}}/><label className="optional"><input type="checkbox" checked={line.isOptional} onChange={e=>{const next=[...form.items];next[index]={...line,isOptional:e.target.checked};setForm({...form,items:next})}}/> Optional</label><button type="button" disabled={form.items.length===1} onClick={()=>setForm({...form,items:form.items.filter((_,i:number)=>i!==index)})}>Hapus</button></div>})}<small>Net quantity adalah kebutuhan bersih. Gross dan base quantity dihitung server dari waste dan conversion.</small></div>
-      <label className="full">Catatan<textarea value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label><label className="full">Instruksi produksi<textarea value={form.productionInstructions} onChange={e=>setForm({...form,productionInstructions:e.target.value})}/></label><div className="full rfc-actions"><button type="button" onClick={()=>setForm(null)}>Batal</button><button className="primary-button" disabled={saving}>{saving?"Menyimpan…":"Simpan Draft"}</button></div>
-    </form></div></div>}
-    {detail&&<div className="md-modal" role="dialog" aria-modal="true"><div className="wide"><header><div><h2>{detail.header.name}</h2><small>{detail.header.code} • Version {detail.selectedVersion?.versionNo}</small></div><button onClick={()=>setDetail(null)}>×</button></header><div className="rfc-detail">
-      <div className="rfc-reference"><span>Outlet acuan approval</span><strong>{lookups.outlets.find(o=>o.id===detail.selectedVersion?.approvedOutletId)?.name??"Belum ditentukan"}</strong><small>Cost outlet lain adalah current estimate dan tidak mengubah approved snapshot.</small></div>
-      {detail.costing&&<><div className="rfc-cost-cards">{canCost&&<><article><span>Total recipe cost</span><strong>{money(detail.costing.totalRecipeCost)}</strong></article><article><span>Cost / serving</span><strong>{money(detail.costing.costPerServing)}</strong></article><article><span>Food cost</span><strong>{percent(detail.costing.foodCostPercentage)}</strong></article><article><span>Gross profit / margin</span><strong>{money(detail.costing.grossProfit)} / {percent(detail.costing.grossMarginPercentage)}</strong></article></>}<article><span>Status estimate</span><strong>{detail.costing.status}</strong><small>{detail.costing.isStale?`Stale: ${detail.costing.staleSources.join(", ")}`:"Sumber masih current"}</small></article></div><div className="table-wrap"><table className="data-table rfc-table"><thead><tr><th>Bahan</th><th>Net / Waste</th><th>Gross / Base</th><th>Source</th>{canCost&&<><th>Cost base</th><th>Total</th></>}</tr></thead><tbody>{detail.costing.lines.map((l:CostLine)=><tr key={l.id}><td><strong>{l.ingredientNameSnapshot}</strong><small>{l.ingredientSkuSnapshot}</small></td><td>{l.netQuantity} / {l.wastePercentage}%</td><td>{l.grossQuantity} / {l.baseQuantity} {l.baseUnitCodeSnapshot}</td><td><span className={`rfc-source ${l.costSource}`}>{l.costSource.replaceAll("_"," ")}</span><small>{l.warningCode??new Date((l.inventorySourceAt??l.supplierSourceAt) as string).toLocaleString("id-ID")}</small></td>{canCost&&<><td>{money(l.costPerBaseUnit)}</td><td>{money(l.totalCost)}</td></>}</tr>)}</tbody></table></div></>}
-      <div className="rfc-detail-actions"><select value={outletId} onChange={e=>setOutletId(e.target.value)}><option value="">Pilih outlet acuan</option>{lookups.outlets.map(o=><option key={o.id} value={o.id}>{o.name}</option>)}</select>{detail.selectedVersion?.status==="draft"&&<><button disabled={!outletId||!can("recipes.recalculate")} onClick={()=>void action(`/recipes/${detail.header.id}/recalculate`,{outletId},"Costing baru selesai dihitung.")}>Recalculate</button><button className="primary-button" disabled={!outletId||!can("recipes.approve")} onClick={()=>confirm("Approve recipe dengan costing baru untuk outlet acuan ini?")&&void action(`/recipes/${detail.header.id}/approve`,{outletId},"Recipe berhasil disetujui.")}>Approve</button></>}{detail.selectedVersion?.status==="approved"&&<button disabled={!can("recipes.revise")} onClick={()=>{const reason=prompt("Alasan revisi");if(reason)void action(`/recipes/${detail.header.id}/revisions`,{reason},"Draft revision dibuat.")}}>Buat Revision</button>}<button disabled={!can(detail.header.isArchived?"recipes.activate":"recipes.archive")} onClick={()=>{if(detail.header.isArchived)void action(`/recipes/${detail.header.id}/activate`,undefined,"Recipe diaktifkan.");else{const reason=prompt("Alasan archive");if(reason)void action(`/recipes/${detail.header.id}/archive`,{reason},"Recipe diarsipkan.")}}}>{detail.header.isArchived?"Aktifkan":"Archive"}</button></div>
-    </div></div></div>}
-  </div>
+export function ConnectedRecipeFoodCost({
+  session,
+  api,
+  onNotify,
+}: {
+  session: AuthSession;
+  api: ApiClient;
+  onNotify: (message: string) => void;
+}) {
+  const can = (p: string) => session.user.permissions.includes(p),
+    canRead = can("recipes.read"),
+    canCost = can("recipes.cost.read");
+  const [rows, setRows] = useState<Row[]>([]),
+    [lookups, setLookups] = useState<Lookups>({
+      menuVariants: [],
+      ingredients: [],
+      units: [],
+      outlets: [],
+    }),
+    [menuCandidates, setMenuCandidates] = useState<RecipeCandidate[]>([]),
+    [query, setQuery] = useState(""),
+    [status, setStatus] = useState(""),
+    [outletId, setOutletId] = useState(""),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [detail, setDetail] = useState<Detail | null>(null),
+    [form, setForm] = useState<RecipeForm | null>(null),
+    [saving, setSaving] = useState(false);
+  const load = useCallback(async () => {
+    if (!canRead) return;
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (status) params.set("status", status);
+      if (outletId) params.set("outletId", outletId);
+      const [data, refs, candidates] = await Promise.all([
+        api<Row[]>(`/recipes?${params}`),
+        api<Lookups>("/menu-products/lookups/recipe-context"),
+        outletId
+          ? api<RecipeCandidate[]>(
+              `/menu-products/lookups/recipe?outletId=${outletId}`,
+            )
+          : Promise.resolve([]),
+      ]);
+      setRows(data);
+      setLookups(refs);
+      setMenuCandidates(candidates);
+      setError("");
+    } catch (e) {
+      setError(message(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [api, status, outletId, canRead]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+  const visible = useMemo(
+    () =>
+      rows.filter((r) =>
+        `${r.code} ${r.name} ${r.menuName}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+      ),
+    [rows, query],
+  );
+  async function open(id: string) {
+    try {
+      const suffix = outletId ? `?outletId=${outletId}` : "";
+      setDetail(await api<Detail>(`/recipes/${id}${suffix}`));
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  function newRecipe() {
+    if (!outletId) {
+      setError(
+        "Pilih outlet terlebih dahulu agar lookup hanya menampilkan variant yang tersedia.",
+      );
+      return;
+    }
+    setForm({
+      code: "",
+      name: "",
+      menuVariantId: "",
+      yieldQuantity: "1.000",
+      yieldUnitId: "",
+      servingCount: "1.000",
+      servingSize: "1.000",
+      servingUnitId: "",
+      notes: "",
+      productionInstructions: "",
+      items: [{ ...blankLine }],
+    });
+  }
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!form) return;
+    setSaving(true);
+    try {
+      await api("/recipes", {
+        method: "POST",
+        body: JSON.stringify({
+          ...form,
+          yieldUnitId: form.yieldUnitId || undefined,
+          servingUnitId: form.servingUnitId || undefined,
+        }),
+      });
+      setForm(null);
+      onNotify("Recipe draft berhasil dibuat.");
+      await load();
+    } catch (c) {
+      setError(message(c));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function action(
+    path: string,
+    body?: unknown,
+    success = "Recipe diperbarui.",
+  ) {
+    try {
+      await api(path, {
+        method: "POST",
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      onNotify(success);
+      setDetail(null);
+      await load();
+    } catch (e) {
+      setError(message(e));
+    }
+  }
+  if (!canRead)
+    return (
+      <section className="panel rfc-denied">
+        <h2>Akses recipe diperlukan</h2>
+        <p>Hubungi administrator untuk permission recipes.read.</p>
+      </section>
+    );
+  return (
+    <div className="rfc-shell">
+      {error && (
+        <div className="io-error" role="alert">
+          <span>{error}</span>
+          <button onClick={() => setError("")}>×</button>
+        </div>
+      )}
+      <section className="rfc-summary">
+        <article>
+          <span>Recipe aktif</span>
+          <strong>{rows.filter((r) => !r.isArchived).length}</strong>
+        </article>
+        <article>
+          <span>Approved</span>
+          <strong>{rows.filter((r) => r.status === "approved").length}</strong>
+        </article>
+        <article>
+          <span>Cost lengkap</span>
+          <strong>{rows.filter((r) => r.costingComplete).length}</strong>
+        </article>
+        <article className="warning">
+          <span>Perlu perhatian</span>
+          <strong>{rows.filter((r) => !r.costingComplete).length}</strong>
+        </article>
+      </section>
+      <section className="panel rfc-panel">
+        <div className="rfc-toolbar">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Cari kode, recipe, atau menu…"
+          />
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">Recipe aktif</option>
+            <option value="draft">Draft</option>
+            <option value="approved">Approved</option>
+            <option value="archived">Archived</option>
+          </select>
+          <select
+            value={outletId}
+            onChange={(e) => setOutletId(e.target.value)}
+          >
+            <option value="">Semua outlet</option>
+            {lookups.outlets.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+          <button
+            className="primary-button"
+            disabled={!can("recipes.create")}
+            onClick={newRecipe}
+          >
+            + Recipe
+          </button>
+        </div>
+        {loading ? (
+          <div className="io-loading">
+            <p>Memuat recipe…</p>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table rfc-table">
+              <thead>
+                <tr>
+                  <th>Recipe / Menu</th>
+                  <th>Version</th>
+                  <th>Status Cost</th>
+                  {canCost && (
+                    <>
+                      <th>Cost / Serving</th>
+                      <th>Food Cost</th>
+                      <th>Gross Margin</th>
+                    </>
+                  )}
+                  <th>Outlet acuan approval</th>
+                  <th>Dihitung</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <strong>{r.name}</strong>
+                      <small>
+                        {r.code} • {r.menuName} / {r.variantName}
+                      </small>
+                    </td>
+                    <td>
+                      v{r.versionNo ?? "—"}
+                      <small>{r.status ?? "Belum ada version"}</small>
+                    </td>
+                    <td>
+                      <span
+                        className={`rfc-status ${r.costingComplete ? "complete" : "incomplete"}`}
+                      >
+                        {r.costingComplete ? "Lengkap" : "Belum lengkap"}
+                      </span>
+                    </td>
+                    {canCost && (
+                      <>
+                        <td>{money(r.costPerServing)}</td>
+                        <td>{percent(r.foodCostPercentage)}</td>
+                        <td>{percent(r.grossMarginPercentage)}</td>
+                      </>
+                    )}
+                    <td>{r.approvedOutletName ?? "Belum disetujui"}</td>
+                    <td>
+                      {r.calculatedAt
+                        ? new Date(r.calculatedAt).toLocaleString("id-ID")
+                        : "—"}
+                    </td>
+                    <td>
+                      <button onClick={() => void open(r.id)}>Detail</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!visible.length && (
+              <div className="io-empty">
+                <strong>Recipe tidak ditemukan</strong>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+      {form && (
+        <div className="md-modal" role="dialog" aria-modal="true">
+          <div className="wide">
+            <header>
+              <h2>Recipe Draft Baru</h2>
+              <button onClick={() => setForm(null)}>×</button>
+            </header>
+            <form className="rfc-form" onSubmit={submit}>
+              <label>
+                Kode
+                <input
+                  required
+                  value={form.code}
+                  onChange={(e) =>
+                    setForm({ ...form, code: e.target.value.toUpperCase() })
+                  }
+                />
+              </label>
+              <label>
+                Nama
+                <input
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </label>
+              <label className="full">
+                Menu variant
+                <select
+                  required
+                  value={form.menuVariantId}
+                  onChange={(e) =>
+                    setForm({ ...form, menuVariantId: e.target.value })
+                  }
+                >
+                  <option value="">Pilih menu</option>
+                  {menuCandidates.map((candidate) => (
+                    <option
+                      key={`${candidate.menuId}:${candidate.variantId ?? "none"}`}
+                      value={candidate.variantId ?? ""}
+                      disabled={!candidate.eligible}
+                    >
+                      {candidate.menuName}
+                      {candidate.variantName
+                        ? ` — ${candidate.variantName}`
+                        : ""}
+                      {!candidate.eligible
+                        ? ` — ${candidateReason(candidate.reasons)}`
+                        : ""}
+                    </option>
+                  ))}
+                </select>
+                {menuCandidates.some((candidate) => !candidate.eligible) && (
+                  <small>
+                    Menu yang belum eligible tetap ditampilkan dengan alasan dan
+                    tidak dapat dipilih.
+                  </small>
+                )}
+              </label>
+              <label>
+                Yield quantity
+                <input
+                  required
+                  inputMode="decimal"
+                  value={form.yieldQuantity}
+                  onChange={(e) =>
+                    setForm({ ...form, yieldQuantity: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Yield unit
+                <select
+                  value={form.yieldUnitId}
+                  onChange={(e) =>
+                    setForm({ ...form, yieldUnitId: e.target.value })
+                  }
+                >
+                  <option value="">Tanpa unit</option>
+                  {lookups.units.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Jumlah serving
+                <input
+                  required
+                  inputMode="decimal"
+                  value={form.servingCount}
+                  onChange={(e) =>
+                    setForm({ ...form, servingCount: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Ukuran serving
+                <input
+                  required
+                  inputMode="decimal"
+                  value={form.servingSize}
+                  onChange={(e) =>
+                    setForm({ ...form, servingSize: e.target.value })
+                  }
+                />
+              </label>
+              <div className="full rfc-builder">
+                <div className="rfc-builder-head">
+                  <h3>Ingredient lines</h3>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setForm({
+                        ...form,
+                        items: [...form.items, { ...blankLine }],
+                      })
+                    }
+                  >
+                    + Bahan
+                  </button>
+                </div>
+                {form.items.map((line: RecipeLineForm, index: number) => {
+                  const ing = lookups.ingredients.find(
+                    (i) => i.id === line.ingredientId,
+                  );
+                  return (
+                    <div className="rfc-line" key={index}>
+                      <select
+                        required
+                        value={line.ingredientId}
+                        onChange={(e) => {
+                          const next = [...form.items];
+                          next[index] = {
+                            ...line,
+                            ingredientId: e.target.value,
+                            unitId: "",
+                          };
+                          setForm({ ...form, items: next });
+                        }}
+                      >
+                        <option value="">Bahan aktif</option>
+                        {lookups.ingredients.map((i) => (
+                          <option key={i.id} value={i.id}>
+                            {i.sku} — {i.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        required
+                        value={line.unitId}
+                        onChange={(e) => {
+                          const next = [...form.items];
+                          next[index] = { ...line, unitId: e.target.value };
+                          setForm({ ...form, items: next });
+                        }}
+                      >
+                        <option value="">Satuan</option>
+                        {lookups.units
+                          .filter((u) => u.dimension === ing?.dimension)
+                          .map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.code}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        required
+                        aria-label="Net quantity"
+                        value={line.netQuantity}
+                        onChange={(e) => {
+                          const next = [...form.items];
+                          next[index] = {
+                            ...line,
+                            netQuantity: e.target.value,
+                          };
+                          setForm({ ...form, items: next });
+                        }}
+                      />
+                      <input
+                        required
+                        aria-label="Waste percentage"
+                        value={line.wastePercentage}
+                        onChange={(e) => {
+                          const next = [...form.items];
+                          next[index] = {
+                            ...line,
+                            wastePercentage: e.target.value,
+                          };
+                          setForm({ ...form, items: next });
+                        }}
+                      />
+                      <label className="optional">
+                        <input
+                          type="checkbox"
+                          checked={line.isOptional}
+                          onChange={(e) => {
+                            const next = [...form.items];
+                            next[index] = {
+                              ...line,
+                              isOptional: e.target.checked,
+                            };
+                            setForm({ ...form, items: next });
+                          }}
+                        />{" "}
+                        Optional
+                      </label>
+                      <button
+                        type="button"
+                        disabled={form.items.length === 1}
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            items: form.items.filter(
+                              (_, i: number) => i !== index,
+                            ),
+                          })
+                        }
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  );
+                })}
+                <small>
+                  Net quantity adalah kebutuhan bersih. Gross dan base quantity
+                  dihitung server dari waste dan conversion.
+                </small>
+              </div>
+              <label className="full">
+                Catatan
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
+              </label>
+              <label className="full">
+                Instruksi produksi
+                <textarea
+                  value={form.productionInstructions}
+                  onChange={(e) =>
+                    setForm({ ...form, productionInstructions: e.target.value })
+                  }
+                />
+              </label>
+              <div className="full rfc-actions">
+                <button type="button" onClick={() => setForm(null)}>
+                  Batal
+                </button>
+                <button className="primary-button" disabled={saving}>
+                  {saving ? "Menyimpan…" : "Simpan Draft"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {detail && (
+        <div className="md-modal" role="dialog" aria-modal="true">
+          <div className="wide">
+            <header>
+              <div>
+                <h2>{detail.header.name}</h2>
+                <small>
+                  {detail.header.code} • Version{" "}
+                  {detail.selectedVersion?.versionNo}
+                </small>
+              </div>
+              <button onClick={() => setDetail(null)}>×</button>
+            </header>
+            <div className="rfc-detail">
+              <div className="rfc-reference">
+                <span>Outlet acuan approval</span>
+                <strong>
+                  {lookups.outlets.find(
+                    (o) => o.id === detail.selectedVersion?.approvedOutletId,
+                  )?.name ?? "Belum ditentukan"}
+                </strong>
+                <small>
+                  Cost outlet lain adalah current estimate dan tidak mengubah
+                  approved snapshot.
+                </small>
+              </div>
+              {detail.costing && (
+                <>
+                  <div className="rfc-cost-cards">
+                    {canCost && (
+                      <>
+                        <article>
+                          <span>Total recipe cost</span>
+                          <strong>
+                            {money(detail.costing.totalRecipeCost)}
+                          </strong>
+                        </article>
+                        <article>
+                          <span>Cost / serving</span>
+                          <strong>
+                            {money(detail.costing.costPerServing)}
+                          </strong>
+                        </article>
+                        <article>
+                          <span>Food cost</span>
+                          <strong>
+                            {percent(detail.costing.foodCostPercentage)}
+                          </strong>
+                        </article>
+                        <article>
+                          <span>Gross profit / margin</span>
+                          <strong>
+                            {money(detail.costing.grossProfit)} /{" "}
+                            {percent(detail.costing.grossMarginPercentage)}
+                          </strong>
+                        </article>
+                      </>
+                    )}
+                    <article>
+                      <span>Status estimate</span>
+                      <strong>{detail.costing.status}</strong>
+                      <small>
+                        {detail.costing.isStale
+                          ? `Stale: ${detail.costing.staleSources.join(", ")}`
+                          : "Sumber masih current"}
+                      </small>
+                    </article>
+                  </div>
+                  <div className="table-wrap">
+                    <table className="data-table rfc-table">
+                      <thead>
+                        <tr>
+                          <th>Bahan</th>
+                          <th>Net / Waste</th>
+                          <th>Gross / Base</th>
+                          <th>Source</th>
+                          {canCost && (
+                            <>
+                              <th>Cost base</th>
+                              <th>Total</th>
+                            </>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detail.costing.lines.map((l: CostLine) => (
+                          <tr key={l.id}>
+                            <td>
+                              <strong>{l.ingredientNameSnapshot}</strong>
+                              <small>{l.ingredientSkuSnapshot}</small>
+                            </td>
+                            <td>
+                              {l.netQuantity} / {l.wastePercentage}%
+                            </td>
+                            <td>
+                              {l.grossQuantity} / {l.baseQuantity}{" "}
+                              {l.baseUnitCodeSnapshot}
+                            </td>
+                            <td>
+                              <span className={`rfc-source ${l.costSource}`}>
+                                {l.costSource.replaceAll("_", " ")}
+                              </span>
+                              <small>
+                                {l.warningCode ??
+                                  new Date(
+                                    (l.inventorySourceAt ??
+                                      l.supplierSourceAt) as string,
+                                  ).toLocaleString("id-ID")}
+                              </small>
+                            </td>
+                            {canCost && (
+                              <>
+                                <td>{money(l.costPerBaseUnit)}</td>
+                                <td>{money(l.totalCost)}</td>
+                              </>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+              <div className="rfc-detail-actions">
+                <select
+                  value={outletId}
+                  onChange={(e) => setOutletId(e.target.value)}
+                >
+                  <option value="">Pilih outlet acuan</option>
+                  {lookups.outlets.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+                {detail.selectedVersion?.status === "draft" && (
+                  <>
+                    <button
+                      disabled={!outletId || !can("recipes.recalculate")}
+                      onClick={() =>
+                        void action(
+                          `/recipes/${detail.header.id}/recalculate`,
+                          { outletId },
+                          "Costing baru selesai dihitung.",
+                        )
+                      }
+                    >
+                      Recalculate
+                    </button>
+                    <button
+                      className="primary-button"
+                      disabled={!outletId || !can("recipes.approve")}
+                      onClick={() =>
+                        confirm(
+                          "Approve recipe dengan costing baru untuk outlet acuan ini?",
+                        ) &&
+                        void action(
+                          `/recipes/${detail.header.id}/approve`,
+                          { outletId },
+                          "Recipe berhasil disetujui.",
+                        )
+                      }
+                    >
+                      Approve
+                    </button>
+                  </>
+                )}
+                {detail.selectedVersion?.status === "approved" && (
+                  <button
+                    disabled={!can("recipes.revise")}
+                    onClick={() => {
+                      const reason = prompt("Alasan revisi");
+                      if (reason)
+                        void action(
+                          `/recipes/${detail.header.id}/revisions`,
+                          { reason },
+                          "Draft revision dibuat.",
+                        );
+                    }}
+                  >
+                    Buat Revision
+                  </button>
+                )}
+                <button
+                  disabled={
+                    !can(
+                      detail.header.isArchived
+                        ? "recipes.activate"
+                        : "recipes.archive",
+                    )
+                  }
+                  onClick={() => {
+                    if (detail.header.isArchived)
+                      void action(
+                        `/recipes/${detail.header.id}/activate`,
+                        undefined,
+                        "Recipe diaktifkan.",
+                      );
+                    else {
+                      const reason = prompt("Alasan archive");
+                      if (reason)
+                        void action(
+                          `/recipes/${detail.header.id}/archive`,
+                          { reason },
+                          "Recipe diarsipkan.",
+                        );
+                    }
+                  }}
+                >
+                  {detail.header.isArchived ? "Aktifkan" : "Archive"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
-function money(value?:string|null){return value==null?"—":new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:2}).format(Number(value))}
-function percent(value?:string|null){return value==null?"—":`${Number(value).toLocaleString("id-ID",{maximumFractionDigits:2})}%`}
-function message(e:unknown){return e instanceof Error?e.message:"Operasi recipe gagal."}
+function money(value?: string | null) {
+  return value == null
+    ? "—"
+    : new Intl.NumberFormat("id-ID", {
+        style: "currency",
+        currency: "IDR",
+        maximumFractionDigits: 2,
+      }).format(Number(value));
+}
+function percent(value?: string | null) {
+  return value == null
+    ? "—"
+    : `${Number(value).toLocaleString("id-ID", { maximumFractionDigits: 2 })}%`;
+}
+function message(e: unknown) {
+  return e instanceof Error ? e.message : "Operasi recipe gagal.";
+}
+
+function candidateReason(reasons: string[]) {
+  const labels: Record<string, string> = {
+    NO_VARIANT: "Belum memiliki variant",
+    NO_OUTLET_SETTING: "Belum dikonfigurasi untuk outlet ini",
+    OUTLET_SETTING_INACTIVE: "Konfigurasi outlet tidak aktif",
+    NOT_AVAILABLE_AT_OUTLET: "Tidak tersedia di outlet",
+    CATEGORY_INACTIVE: "Kategori tidak aktif",
+    MENU_INACTIVE: "Menu tidak aktif",
+    VARIANT_INACTIVE: "Variant tidak aktif",
+    RECIPE_EXISTS: "Sudah memiliki resep",
+  };
+  return reasons.map((reason) => labels[reason] ?? reason).join("; ");
+}

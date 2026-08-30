@@ -3,5 +3,10 @@ import { DatabaseModule } from "../database/database.module";
 import { InventoryModule } from "../inventory/inventory.module";
 import { RecipesController } from "./recipes.controller";
 import { RecipesService } from "./recipes.service";
-@Module({ imports: [DatabaseModule, InventoryModule], controllers: [RecipesController], providers: [RecipesService] })
+import { MenuProductsModule } from "../menu-products/menu-products.module";
+@Module({
+  imports: [DatabaseModule, InventoryModule, MenuProductsModule],
+  controllers: [RecipesController],
+  providers: [RecipesService],
+})
 export class RecipesModule {}

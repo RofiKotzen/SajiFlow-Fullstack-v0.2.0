@@ -9,6 +9,7 @@ import { ConnectedMasterData } from "./master-data";
 import { ConnectedPurchaseOrders } from "./purchase-orders";
 import { ConnectedSupplierManagement } from "./supplier-management";
 import { ConnectedRecipeFoodCost } from "./recipe-food-cost";
+import { ConnectedMenuProducts } from "./menu-products";
 import { AuthGate, type ApiClient, type AuthSession } from "./sajiflow-api";
 
 type View =
@@ -21,6 +22,7 @@ type View =
   | "kds"
   | "inventory"
   | "masters"
+  | "menu-products"
   | "pos"
   | "settings";
 type IconName =
@@ -38,7 +40,9 @@ type IconName =
   | "bell"
   | "arrow"
   | "check"
-  | "close";
+  | "close"
+  | "menu"
+  | "collapse";
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -123,6 +127,8 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     ),
     check: <path d="m5 12 4 4L19 6" />,
     close: <path d="m6 6 12 12M18 6 6 18" />,
+    menu: <path d="M4 7h16M4 12h16M4 17h16" />,
+    collapse: <path d="m14 7-5 5 5 5" />,
   };
   return (
     <svg
@@ -883,35 +889,56 @@ function OperationWorkspace({
   const [view, setView] = useState<View>("dashboard");
   const [toast, setToast] = useState("");
   const [detail, setDetail] = useState<DetailSelection | null>(null);
-  const nav = ([
-    { id: "dashboard", label: "Ringkasan", icon: "grid" },
-    { id: "pos", label: "POS & Penjualan", icon: "pos" },
-    { id: "kds", label: "Kitchen Display", icon: "kitchen" },
-    { id: "inventory", label: "Inventory & Stock", icon: "inventory" },
-    { id: "masters", label: "Master Bahan & Satuan", icon: "box" },
-    { id: "orders", label: "Purchase Order", icon: "cart" },
-    { id: "budgets", label: "Budget Planning", icon: "budget" },
-    { id: "receipts", label: "Penerimaan Barang", icon: "box" },
-    { id: "suppliers", label: "Supplier", icon: "truck" },
-    { id: "recipes", label: "Resep & Food Cost", icon: "recipe" },
-    { id: "settings", label: "Administrasi", icon: "grid" },
-  ] satisfies { id: View; label: string; icon: IconName }[])
-    .filter(
-      (item) =>
-        item.id !== "masters" ||
-        session.user.permissions.includes("ingredients.read") ||
-        session.user.permissions.includes("units.read"),
-    )
-    .filter(
-      (item) =>
-        item.id !== "suppliers" ||
-        session.user.permissions.includes("suppliers.read"),
-    )
-    .filter(
-      (item) =>
-        item.id !== "recipes" ||
-        session.user.permissions.includes("recipes.read"),
-    );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const permissions = session.user.permissions;
+  const hasAnyPermission = (...codes: string[]) =>
+    codes.some((code) => permissions.includes(code));
+  const navGroups = [
+    {
+      label: "Utama",
+      items: [{ id: "dashboard", label: "Dashboard", icon: "grid", visible: true }],
+    },
+    {
+      label: "Operasional",
+      items: [
+        { id: "pos", label: "POS", icon: "pos", visible: true },
+        { id: "kds", label: "Kitchen Display", icon: "kitchen", visible: true },
+      ],
+    },
+    {
+      label: "Persediaan",
+      items: [
+        { id: "inventory", label: "Ringkasan Stok", icon: "inventory", visible: hasAnyPermission("inventory.read") },
+      ],
+    },
+    {
+      label: "Pembelian",
+      items: [
+        { id: "budgets", label: "Budget Planning", icon: "budget", visible: hasAnyPermission("budgets.read") },
+        { id: "orders", label: "Purchase Order", icon: "cart", visible: hasAnyPermission("purchase_orders.read") },
+        { id: "receipts", label: "Goods Receipt", icon: "box", visible: hasAnyPermission("goods_receipts.read") },
+      ],
+    },
+    {
+      label: "Master Data",
+      items: [
+        { id: "masters", label: "Bahan & Satuan", icon: "box", visible: hasAnyPermission("ingredients.read", "units.read") },
+        { id: "suppliers", label: "Supplier", icon: "truck", visible: hasAnyPermission("suppliers.read") },
+        { id: "menu-products", label: "Menu & Produk", icon: "recipe", visible: hasAnyPermission("menus.read") },
+        { id: "recipes", label: "Resep & Food Cost", icon: "recipe", visible: hasAnyPermission("recipes.read") },
+      ],
+    },
+    {
+      label: "Sistem",
+      items: [
+        { id: "settings", label: "Pengaturan", icon: "grid", visible: hasAnyPermission("tenant.read", "outlets.read", "users.read", "roles.read", "permissions.read") },
+      ],
+    },
+  ] satisfies { label: string; items: { id: View; label: string; icon: IconName; visible: boolean }[] }[];
+  const currentGroup = navGroups.find((group) =>
+    group.items.some((item) => item.id === view),
+  )?.label;
   const titles: Record<View, { title: string; subtitle: string }> = {
     dashboard: {
       title: "Purchasing Overview",
@@ -957,6 +984,11 @@ function OperationWorkspace({
       subtitle:
         "Kelola identitas bahan, satuan dasar, dan parameter persediaan setiap outlet.",
     },
+    "menu-products": {
+      title: "Menu & Produk",
+      subtitle:
+        "Kelola kategori, menu, variant, harga, dan availability setiap outlet.",
+    },
     pos: {
       title: "POS & Sales",
       subtitle:
@@ -974,30 +1006,30 @@ function OperationWorkspace({
   }
 
   return (
-    <main className="app-shell">
-      <aside className="sidebar">
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      {mobileNavOpen && <button className="nav-scrim" aria-label="Tutup navigasi" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={`sidebar ${mobileNavOpen ? "mobile-open" : ""}`}>
         <div className="brand">
-          <div className="brand-mark">K</div>
+          <div className="brand-mark">S</div>
           <div>
-            <strong>Kotzen</strong>
-            <span>Operation</span>
+            <strong>Saji Flow</strong>
+            <span>Restaurant Operations</span>
           </div>
+          <button className="sidebar-collapse" aria-label={sidebarCollapsed ? "Perluas sidebar" : "Ciutkan sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}><Icon name="collapse" /></button>
         </div>
         <nav aria-label="Navigasi utama">
-          <p className="nav-label">Workspace</p>
-          {nav.map((item) => (
-            <button
-              key={item.id}
-              className={view === item.id ? "active" : ""}
-              onClick={() => {
-                setView(item.id);
-              }}
-            >
-              <Icon name={item.icon} />
-              <span>{item.label}</span>
-              {view === item.id && <i />}
-            </button>
-          ))}
+          {navGroups.map((group) => {
+            const items = group.items.filter((item) => item.visible);
+            if (!items.length) return null;
+            return <div className="nav-group" key={group.label}>
+              <p className="nav-label">{group.label}</p>
+              {items.map((item) => (
+                <button key={item.id} title={sidebarCollapsed ? item.label : undefined} aria-current={view === item.id ? "page" : undefined} className={view === item.id ? "active" : ""} onClick={() => { setView(item.id); setMobileNavOpen(false); }}>
+                  <Icon name={item.icon} /><span>{item.label}</span>{view === item.id && <i />}
+                </button>
+              ))}
+            </div>;
+          })}
         </nav>
         <div className="sidebar-card">
           <span className="eyebrow">Bulan berjalan</span>
@@ -1021,8 +1053,8 @@ function OperationWorkspace({
       <section className="workspace">
         <header className="topbar">
           <div className="mobile-brand">
-            <div className="brand-mark">K</div>
-            <strong>Kotzen Operation</strong>
+            <button className="icon-button mobile-menu" aria-label="Buka navigasi" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Icon name="menu" /></button>
+            <div><strong>Saji Flow</strong><span>{titles[view].title}</span></div>
           </div>
           <div className="top-actions">
             <SessionControls api={api} logout={logout} />
@@ -1030,29 +1062,14 @@ function OperationWorkspace({
               <Icon name="bell" />
               <span className="notification-dot" />
             </button>
-            <span className="date-chip">24 Agustus 2026</span>
+            <span className="date-chip">{new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric" }).format(new Date())}</span>
           </div>
         </header>
         <div className="content">
           <div className="page-heading">
             <div>
               <p className="breadcrumb">
-                SAJI FLOW /{" "}
-                {view === "recipes"
-                  ? "FOOD COST"
-                  : view === "budgets"
-                    ? "BUDGET CONTROL"
-                    : view === "kds"
-                      ? "KITCHEN OPERATIONS"
-                      : view === "inventory"
-                        ? "INVENTORY CONTROL"
-                        : view === "masters"
-                          ? "MASTER DATA"
-                          : view === "pos"
-                            ? "POINT OF SALE"
-                            : view === "settings"
-                              ? "WORKSPACE ADMIN"
-                              : "PURCHASING"}
+                <span>Saji Flow</span><b aria-hidden="true">/</b><span>{currentGroup}</span><b aria-hidden="true">/</b><strong>{titles[view].title}</strong>
               </p>
               <h1>{titles[view].title}</h1>
               <p>{titles[view].subtitle}</p>
@@ -1114,7 +1131,11 @@ function OperationWorkspace({
             />
           )}
           {view === "recipes" && (
-            <ConnectedRecipeFoodCost session={session} api={api} onNotify={notify} />
+            <ConnectedRecipeFoodCost
+              session={session}
+              api={api}
+              onNotify={notify}
+            />
           )}
           {view === "budgets" && (
             <ConnectedBudgetPlanning
@@ -1134,6 +1155,13 @@ function OperationWorkspace({
           )}
           {view === "masters" && (
             <ConnectedMasterData
+              session={session}
+              api={api}
+              onNotify={notify}
+            />
+          )}
+          {view === "menu-products" && (
+            <ConnectedMenuProducts
               session={session}
               api={api}
               onNotify={notify}

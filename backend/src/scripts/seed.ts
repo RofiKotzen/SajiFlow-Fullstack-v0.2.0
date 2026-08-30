@@ -107,6 +107,16 @@ const permissionSeed = [
   ["recipes.activate", "recipes", "Mengaktifkan kembali recipe"],
   ["recipes.cost.read", "recipes", "Melihat nominal cost, profit, dan margin"],
   ["recipes.audit.read", "recipes", "Melihat audit trail recipe"],
+  ["menus.read", "menus", "Melihat master menu dan produk"],
+  ["menus.create", "menus", "Membuat menu"],
+  ["menus.update", "menus", "Mengubah menu"],
+  ["menus.archive", "menus", "Mengarsipkan atau mengaktifkan menu"],
+  ["menus.categories.manage", "menus", "Mengelola kategori menu"],
+  ["menus.variants.manage", "menus", "Mengelola variant menu"],
+  ["menus.prices.read", "menus", "Melihat harga jual menu"],
+  ["menus.prices.manage", "menus", "Mengelola harga jual menu"],
+  ["menus.outlets.manage", "menus", "Mengelola availability menu per outlet"],
+  ["menus.audit.read", "menus", "Melihat audit trail menu"],
 ] as const;
 
 async function main(): Promise<void> {
