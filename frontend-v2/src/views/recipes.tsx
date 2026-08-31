@@ -1,198 +1,65 @@
-import { Plus, Search } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, Calculator, CheckCircle2, History, Plus, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Btn, Card, CardHeader, DataTable, Row, Cell, Drawer, Field, TextInput, SelectInput, TextArea, StatusBadge, Badge, Modal } from "@/components/ui";
-import { RECIPES, MENUS, INGREDIENTS, UNITS, OUTLETS, ingredientName, idr, type Recipe, type RecipeItem } from "@/lib/mock-data";
+import { Badge, Btn, Card, CardHeader, Cell, DataTable, Drawer, Field, Modal, Row, SelectInput, StatusBadge, TextArea, TextInput } from "@/components/ui";
+import { useAuth } from "@/contexts/auth-context";
+import { ApiError } from "@/lib/api/types";
 
-// harga base per unit dasar (mock) untuk kalkulasi food cost presentasional
-const UNIT_COST: Record<string, number> = { "BHN-001": 42, "BHN-002": 12.5, "BHN-003": 137, "BHN-004": 0.0145, "BHN-005": 180, "BHN-006": 135, "BHN-007": 15, "BHN-008": 28, "BHN-009": 11, "BHN-010": 98 };
+type RowData = { id:string; code:string; name:string; isArchived:boolean; menuName:string; variantName:string; versionNo:number|null; status:string|null; costingComplete:boolean|null; approvedOutletName:string|null; calculatedAt:string|null; costPerServing?:string|null; foodCostPercentage?:string|null; grossMarginPercentage?:string|null };
+type Lookup = { menuVariants:unknown[]; ingredients:{id:string;sku:string;name:string;baseUnitId:string;baseUnitCode:string;dimension:string}[]; units:{id:string;code:string;name:string;dimension:string}[]; outlets:{id:string;code:string;name:string}[] };
+type Candidate = { menuId:string;menuName:string;variantId:string|null;variantName:string|null;eligible:boolean;reasons:string[] };
+type Version = { id:string;versionNo:number;status:string;yieldQty:string;yieldUnitId:string|null;servingCount:string;servingSize:string;servingUnitId:string|null;notes:string|null;productionInstructions:string|null;approvedAt:string|null;approvedOutletId:string|null;revisionReason:string|null };
+type Item = { item:{ingredientId:string;unitId:string;netQuantity:string;wastePercentage:string;grossQuantity:string;baseQuantity:string;isOptional:boolean};ingredientName:string;ingredientSku:string;unitCode:string;baseUnitCode:string };
+type CostLine = { id:string;ingredientNameSnapshot:string;ingredientSkuSnapshot:string;unitCodeSnapshot:string;baseUnitCodeSnapshot:string;netQuantity:string;wastePercentage:string;grossQuantity:string;baseQuantity:string;costSource:string;warningCode:string|null;costPerBaseUnit?:string|null;totalCost?:string|null };
+type Costing = { status:string;runType:string;sellingPriceSnapshot?:string|null;totalRecipeCost?:string|null;costPerYield?:string|null;costPerServing?:string|null;foodCostPercentage?:string|null;grossProfit?:string|null;grossMarginPercentage?:string|null;warningCodes:string[];calculatedAt:string;sourceVersionAt:string;isStale:boolean;staleSources:string[];lines:CostLine[] };
+type Detail = { header:{id:string;code:string;name:string;isArchived:boolean};menu:{name:string};variant:{id:string;name:string};versions:Version[];selectedVersion:Version|null;items:Item[];costing:Costing|null };
+type LineForm = {ingredientId:string;unitId:string;netQuantity:string;wastePercentage:string;isOptional:boolean};
+type RecipeForm = {code:string;name:string;menuVariantId:string;yieldQuantity:string;yieldUnitId:string;servingCount:string;servingSize:string;servingUnitId:string;notes:string;productionInstructions:string;items:LineForm[]};
+type Confirm = {kind:"approve"|"revise"|"archive"|"activate";title:string;text:string;reason:string}|null;
+const emptyLookup:Lookup={menuVariants:[],ingredients:[],units:[],outlets:[]};
+const blank=():LineForm=>({ingredientId:"",unitId:"",netQuantity:"1.000000",wastePercentage:"0.00",isOptional:false});
 
-const costOf = (r: Recipe) =>
-  r.items.reduce((s, it) => {
-    const per = UNIT_COST[it.sku] ?? 0;
-    return s + it.qty * per * (1 + it.waste / 100);
-  }, 0);
-
-export function RecipesView() {
-  const [recipes, setRecipes] = useState<Recipe[]>(RECIPES);
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [outlet, setOutlet] = useState("all");
-  const [selected, setSelected] = useState<Recipe | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [fOutlet, setFOutlet] = useState("KMG");
-  const [items, setItems] = useState<RecipeItem[]>([{ sku: "BHN-001", unit: "G", qty: 100, waste: 0 }]);
-
-  const rows = recipes.filter((r) => `${r.name} ${r.menuVariant}`.toLowerCase().includes(q.toLowerCase()) && (statusFilter === "all" || r.status === statusFilter) && (outlet === "all" || r.outlet === outlet));
-
-  const allVariants = MENUS.flatMap((m) => m.variants.map((v) => ({ ...v, menuName: m.name, menuActive: m.active })));
-  const candidates = allVariants.map((v) => {
-    const taken = recipes.some((r) => r.menuVariant === v.sku && r.status !== "archived");
-    const availableHere = v.availability[fOutlet];
-    return {
-      sku: v.sku, label: `${v.menuName} — ${v.name}`,
-      eligible: v.menuActive && availableHere && !taken,
-      reason: !v.menuActive ? "menu diarsipkan" : !availableHere ? "tidak tersedia di outlet" : taken ? "sudah memiliki resep" : "",
-    };
-  });
-
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Resep & Food Cost</h1>
-          <p className="mt-1 text-[13px] text-mute">Komposisi bahan, food cost, dan margin per menu</p>
-        </div>
-        <Btn onClick={() => setCreating(true)}><Plus className="size-3.5" /> Buat Resep</Btn>
-      </div>
-
-      <Card className="overflow-hidden">
-        <CardHeader
-          title="Daftar Resep"
-          sub={`${rows.length} resep`}
-          action={
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute/70" />
-                <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nama resep / menu…" className="w-44 pl-8" />
-              </div>
-              <SelectInput value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-32">
-                <option value="all">Semua status</option><option value="draft">Draft</option><option value="approved">Approved</option><option value="archived">Archived</option>
-              </SelectInput>
-              <SelectInput value={outlet} onChange={(e) => setOutlet(e.target.value)} className="w-28">
-                <option value="all">Semua outlet</option>
-                {OUTLETS.map((o) => <option key={o.code} value={o.code}>{o.code}</option>)}
-              </SelectInput>
-            </div>
-          }
-        />
-        <DataTable head={["Kode", "Nama Resep", "Outlet", "Harga Jual", "Food Cost", "Cost %", "Margin", "Status"]} wide>
-          {rows.map((r) => {
-            const cost = costOf(r) / r.yieldQty;
-            const pct = r.sellingPrice > 0 ? (cost / r.sellingPrice) * 100 : 0;
-            return (
-              <Row key={r.code} onClick={() => setSelected(r)}>
-                <Cell className="mono text-ink/90">{r.code}</Cell>
-                <Cell className="font-medium">{r.name}</Cell>
-                <Cell className="text-mute">{r.outlet}</Cell>
-                <Cell className="mono text-right">{idr(r.sellingPrice)}</Cell>
-                <Cell className="mono text-right">{idr(cost)}</Cell>
-                <Cell className="text-right"><Badge tone={pct > 40 ? "terra" : pct > 32 ? "amber" : "olive"}>{pct.toFixed(1)}%</Badge></Cell>
-                <Cell className="mono text-right">{idr(r.sellingPrice - cost)}</Cell>
-                <Cell><StatusBadge label={r.status} /></Cell>
-              </Row>
-            );
-          })}
-        </DataTable>
-      </Card>
-
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.name ?? ""} sub={selected ? `${selected.code} · outlet ${selected.outlet} · ${selected.menuVariant}` : undefined}>
-        {selected && (() => {
-          const cost = costOf(selected) / selected.yieldQty;
-          const pct = (cost / selected.sellingPrice) * 100;
-          return (
-            <div className="space-y-5">
-              <div className="flex items-center justify-between">
-                <StatusBadge label={selected.status} />
-                <Badge tone={pct > 40 ? "terra" : pct > 32 ? "amber" : "olive"}>Food cost {pct.toFixed(1)}%</Badge>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-[12.5px]">
-                <div><p className="text-mute">Harga jual</p><p className="mono mt-0.5 font-medium">{idr(selected.sellingPrice)}</p></div>
-                <div><p className="text-mute">Cost per serving</p><p className="mono mt-0.5 font-medium">{idr(cost)}</p></div>
-                <div><p className="text-mute">Yield</p><p className="mono mt-0.5 font-medium">{selected.yieldQty} porsi</p></div>
-                <div><p className="text-mute">Margin</p><p className="mono mt-0.5 font-medium text-olive-deep">{idr(selected.sellingPrice - cost)}</p></div>
-              </div>
-              <div>
-                <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-mute">Bahan</p>
-                <ul className="space-y-2">
-                  {selected.items.map((it) => (
-                    <li key={it.sku} className="flex items-center justify-between rounded-lg bg-cream px-3 py-2 text-[12.5px] ring-1 ring-black/5">
-                      <span>{ingredientName(it.sku)}</span>
-                      <span className="mono text-mute">{it.qty} {it.unit}{it.waste > 0 && ` · waste ${it.waste}%`}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {selected.note && <p className="rounded-lg bg-olive-soft px-3 py-2 text-[12.5px] text-olive-deep">{selected.note}</p>}
-              <div className="flex flex-wrap gap-2">
-                {selected.status === "draft" && (
-                  <Btn onClick={() => { setRecipes((p) => p.map((r) => (r.code === selected.code ? { ...r, status: "approved" } : r))); setSelected({ ...selected, status: "approved" }); toast.success("Resep disetujui"); }}>Approve Resep</Btn>
-                )}
-                {selected.status !== "archived" ? (
-                  <Btn variant="outline" onClick={() => { setRecipes((p) => p.map((r) => (r.code === selected.code ? { ...r, status: "archived" } : r))); setSelected({ ...selected, status: "archived" }); toast.success("Resep diarsipkan"); }}>Arsipkan</Btn>
-                ) : (
-                  <Btn variant="outline" onClick={() => { setRecipes((p) => p.map((r) => (r.code === selected.code ? { ...r, status: "draft" } : r))); setSelected({ ...selected, status: "draft" }); toast.success("Resep diaktifkan sebagai draft"); }}>Aktifkan</Btn>
-                )}
-              </div>
-            </div>
-          );
-        })()}
-      </Drawer>
-
-      <Modal open={creating} onClose={() => setCreating(false)} title="Buat Resep" wide>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            if (items.some((i) => i.qty <= 0)) { toast.error("Quantity bahan harus lebih dari nol"); return; }
-            const code = String(fd.get("code"));
-            setRecipes((p) => [...p, { code, name: String(fd.get("name")), outlet: fOutlet, menuVariant: String(fd.get("variant")), status: "draft", yieldQty: Number(fd.get("yield")), sellingPrice: Number(fd.get("price")), items, note: String(fd.get("note") || "") || undefined }]);
-            setCreating(false);
-            toast.success(`Draft ${code} disimpan`);
-          }}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Kode resep" required><TextInput name="code" required defaultValue={`RCP-00${recipes.length + 1}`} /></Field>
-            <Field label="Nama resep" required><TextInput name="name" required /></Field>
-            <Field label="Outlet" required>
-              <SelectInput value={fOutlet} onChange={(e) => setFOutlet(e.target.value)}>
-                {OUTLETS.filter((o) => o.active).map((o) => <option key={o.code} value={o.code}>{o.name}</option>)}
-              </SelectInput>
-            </Field>
-            <Field label="Menu product / variant" required hint="Kandidat outlet-aware">
-              <SelectInput name="variant" required>
-                {candidates.map((c) => (
-                  <option key={c.sku} value={c.sku} disabled={!c.eligible}>
-                    {c.label}{c.eligible ? "" : ` — tidak eligible (${c.reason})`}
-                  </option>
-                ))}
-              </SelectInput>
-            </Field>
-            <Field label="Yield quantity" required><TextInput name="yield" type="number" min={0.01} step={0.01} defaultValue={1} required /></Field>
-            <Field label="Selling price" required><TextInput name="price" type="number" min={0} step={0.01} required /></Field>
-          </div>
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[12px] font-medium text-ink/80">Bahan <span className="text-terra">*</span></p>
-              <Btn type="button" variant="outline" className="px-2 py-1 text-[12px]" onClick={() => setItems((p) => [...p, { sku: "BHN-002", unit: "G", qty: 100, waste: 0 }])}><Plus className="size-3" /> Tambah bahan</Btn>
-            </div>
-            <div className="space-y-2">
-              {items.map((it, idx) => {
-                const baseDim = UNITS.find((u) => u.code === INGREDIENTS.find((i) => i.sku === it.sku)?.baseUnit)?.dimension;
-                return (
-                  <div key={idx} className="flex items-center gap-2">
-                    <SelectInput className="flex-1" value={it.sku} onChange={(e) => setItems((p) => p.map((x, i) => (i === idx ? { ...x, sku: e.target.value } : x)))}>
-                      {INGREDIENTS.filter((i) => i.active).map((i) => <option key={i.sku} value={i.sku}>{i.name}</option>)}
-                    </SelectInput>
-                    <SelectInput className="w-24" value={it.unit} onChange={(e) => setItems((p) => p.map((x, i) => (i === idx ? { ...x, unit: e.target.value } : x)))}>
-                      {UNITS.filter((u) => u.active && u.dimension === baseDim).map((u) => <option key={u.code}>{u.code}</option>)}
-                    </SelectInput>
-                    <TextInput type="number" min={0.01} step={0.01} className="w-24" placeholder="Qty" value={it.qty || ""} onChange={(e) => setItems((p) => p.map((x, i) => (i === idx ? { ...x, qty: Number(e.target.value) } : x)))} />
-                    <TextInput type="number" min={0} className="w-20" placeholder="Waste %" value={it.waste} onChange={(e) => setItems((p) => p.map((x, i) => (i === idx ? { ...x, waste: Number(e.target.value) } : x)))} />
-                    <Btn type="button" variant="ghost" className="px-2" disabled={items.length === 1} onClick={() => setItems((p) => p.filter((_, i) => i !== idx))}>✕</Btn>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          <Field label="Catatan / instruksi"><TextArea name="note" /></Field>
-          <div className="flex justify-end gap-2 border-t border-black/5 pt-3">
-            <Btn type="button" variant="ghost" onClick={() => setCreating(false)}>Batal</Btn>
-            <Btn type="submit">Simpan Draft</Btn>
-          </div>
-        </form>
-      </Modal>
-    </div>
-  );
+export function RecipesView(){
+  const {api,session,activeOutletId}=useAuth();
+  const can=useCallback((p:string)=>(session?.user.permissions??[]).includes(p),[session]);
+  const canRead=can("recipes.read"), canCost=can("recipes.cost.read");
+  const [rows,setRows]=useState<RowData[]>([]),[lookups,setLookups]=useState<Lookup>(emptyLookup),[candidates,setCandidates]=useState<Candidate[]>([]);
+  const [outletId,setOutletId]=useState(activeOutletId),[query,setQuery]=useState(""),[status,setStatus]=useState("");
+  const [loading,setLoading]=useState(true),[error,setError]=useState(""),[lookupLoading,setLookupLoading]=useState(false),[lookupError,setLookupError]=useState("");
+  const [detailId,setDetailId]=useState(""),[detail,setDetail]=useState<Detail|null>(null),[detailLoading,setDetailLoading]=useState(false),[detailError,setDetailError]=useState("");
+  const [form,setForm]=useState<RecipeForm|null>(null),[editing,setEditing]=useState(false),[submitting,setSubmitting]=useState(false),[formError,setFormError]=useState(""),[conflict,setConflict]=useState(false);
+  const [actionLoading,setActionLoading]=useState(""),[actionError,setActionError]=useState(""),[confirmState,setConfirmState]=useState<Confirm>(null);
+  useEffect(()=>{if(activeOutletId)setOutletId(activeOutletId)},[activeOutletId]);
+  const loadContext=useCallback(async()=>{if(!canRead)return;setLookupLoading(true);try{const x=await api<Lookup>("/menu-products/lookups/recipe-context");setLookups(x);setLookupError("");setOutletId(v=>v||activeOutletId||x.outlets[0]?.id||"")}catch(e){setLookupError(msg(e))}finally{setLookupLoading(false)}},[activeOutletId,api,canRead]);
+  const loadRows=useCallback(async()=>{if(!canRead)return;setLoading(true);try{const p=new URLSearchParams();if(outletId)p.set("outletId",outletId);if(status)p.set("status",status);setRows(await api<RowData[]>(`/recipes?${p}`));setError("")}catch(e){setError(msg(e))}finally{setLoading(false)}},[api,canRead,outletId,status]);
+  const loadCandidates=useCallback(async()=>{if(!canRead||!outletId){setCandidates([]);return}setLookupLoading(true);try{setCandidates(await api<Candidate[]>(`/menu-products/lookups/recipe?outletId=${encodeURIComponent(outletId)}`));setLookupError("")}catch(e){setCandidates([]);setLookupError(msg(e))}finally{setLookupLoading(false)}},[api,canRead,outletId]);
+  const openDetail=useCallback(async(id:string)=>{setDetailId(id);setDetail(null);setDetailError("");setDetailLoading(true);try{setDetail(await api<Detail>(`/recipes/${id}${outletId?`?outletId=${encodeURIComponent(outletId)}`:""}`))}catch(e){setDetailError(msg(e))}finally{setDetailLoading(false)}},[api,outletId]);
+  useEffect(()=>{void loadContext()},[loadContext]);useEffect(()=>{void loadRows()},[loadRows]);useEffect(()=>{void loadCandidates()},[loadCandidates]);
+  const visible=useMemo(()=>rows.filter(r=>`${r.code} ${r.name} ${r.menuName} ${r.variantName}`.toLowerCase().includes(query.trim().toLowerCase())),[query,rows]);
+  const summary=useMemo(()=>({active:rows.filter(r=>!r.isArchived).length,approved:rows.filter(r=>r.status==="approved").length,complete:rows.filter(r=>r.costingComplete).length,attention:rows.filter(r=>!r.costingComplete).length}),[rows]);
+  function startCreate(){if(!outletId){setLookupError("Pilih outlet aktif sebelum membuat Recipe.");return}setEditing(false);setFormError("");setForm({code:"",name:"",menuVariantId:"",yieldQuantity:"1.000",yieldUnitId:"",servingCount:"1.000",servingSize:"1.000",servingUnitId:"",notes:"",productionInstructions:"",items:[blank()]})}
+  function startEdit(){if(!detail?.selectedVersion||detail.selectedVersion.status!=="draft")return;const v=detail.selectedVersion;setEditing(true);setFormError("");setForm({code:detail.header.code,name:detail.header.name,menuVariantId:detail.variant.id,yieldQuantity:v.yieldQty,yieldUnitId:v.yieldUnitId??"",servingCount:v.servingCount,servingSize:v.servingSize,servingUnitId:v.servingUnitId??"",notes:v.notes??"",productionInstructions:v.productionInstructions??"",items:detail.items.map(({item})=>({ingredientId:item.ingredientId,unitId:item.unitId,netQuantity:item.netQuantity,wastePercentage:item.wastePercentage,isOptional:item.isOptional}))})}
+  async function submit(e:FormEvent){e.preventDefault();if(!form)return;setSubmitting(true);setFormError("");setConflict(false);try{const body={name:form.name,yieldQuantity:form.yieldQuantity,yieldUnitId:form.yieldUnitId||undefined,servingCount:form.servingCount,servingSize:form.servingSize,servingUnitId:form.servingUnitId||undefined,notes:form.notes,productionInstructions:form.productionInstructions,items:form.items};if(editing&&detail)await api(`/recipes/${detail.header.id}/draft`,{method:"PATCH",body:JSON.stringify(body)});else await api("/recipes",{method:"POST",body:JSON.stringify({code:form.code,menuVariantId:form.menuVariantId,...body})});toast.success(editing?"Draft Recipe diperbarui.":"Draft Recipe dibuat.");const id=detail?.header.id;setForm(null);await loadRows();if(id)await openDetail(id)}catch(x){setConflict(x instanceof ApiError&&x.status===409);setFormError(msg(x))}finally{setSubmitting(false)}}
+  async function recalculate(){if(!detail||!outletId)return;setActionLoading("recalculate");setActionError("");try{await api(`/recipes/${detail.header.id}/recalculate`,{method:"POST",body:JSON.stringify({outletId})});toast.success("Costing dihitung ulang oleh backend.");await openDetail(detail.header.id);await loadRows()}catch(e){setActionError(msg(e))}finally{setActionLoading("")}}
+  async function confirmed(){if(!detail||!confirmState)return;const a=confirmState.kind;setActionLoading(a);try{if(a==="approve")await api(`/recipes/${detail.header.id}/approve`,{method:"POST",body:JSON.stringify({outletId})});if(a==="revise")await api(`/recipes/${detail.header.id}/revisions`,{method:"POST",body:JSON.stringify({reason:confirmState.reason})});if(a==="archive")await api(`/recipes/${detail.header.id}/archive`,{method:"POST",body:JSON.stringify({reason:confirmState.reason})});if(a==="activate")await api(`/recipes/${detail.header.id}/activate`,{method:"POST"});toast.success(a==="approve"?"Recipe disetujui dan snapshot dibuat.":a==="revise"?"Draft revisi dibuat.":a==="archive"?"Recipe diarsipkan.":"Recipe diaktifkan.");setConfirmState(null);await loadRows();await openDetail(detail.header.id)}catch(e){setActionError(msg(e));setConfirmState(null)}finally{setActionLoading("")}}
+  if(!canRead)return <State kind="forbidden" title="Akses Recipe diperlukan" text="Permission recipes.read diperlukan. API Recipe tidak dipanggil."/>;
+  const retry=()=>{void loadContext();void loadRows();void loadCandidates()};
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Resep & Food Cost</h1><p className="mt-1 text-[13px] text-mute">Komposisi bahan, costing backend, dan approval per outlet</p></div>{can("recipes.create")&&<Btn onClick={startCreate} disabled={!outletId||lookupLoading}><Plus className="size-3.5"/> Buat Resep</Btn>}</div>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Kpi label="Recipe aktif" value={summary.active}/><Kpi label="Disetujui" value={summary.approved}/><Kpi label="Cost lengkap" value={summary.complete}/><Kpi label="Perlu perhatian" value={summary.attention} warning/></div>
+    {(error||lookupError)&&<Alert text={error||lookupError} onRetry={retry}/>}<Card className="overflow-hidden"><CardHeader title="Daftar Resep" sub={`${visible.length} dari ${rows.length} resep`} action={<div className="flex flex-wrap items-center justify-end gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute/70"/><TextInput value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari resep / menu…" className="w-48 pl-8"/></div><SelectInput aria-label="Filter status" value={status} onChange={e=>setStatus(e.target.value)} className="w-36"><option value="">Recipe aktif</option><option value="draft">Draft</option><option value="approved">Disetujui</option><option value="archived">Diarsipkan</option></SelectInput><SelectInput aria-label="Outlet Recipe" value={outletId} onChange={e=>setOutletId(e.target.value)} className="w-44" disabled={lookupLoading}><option value="">Pilih outlet</option>{lookups.outlets.map(o=><option key={o.id} value={o.id}>{o.code} — {o.name}</option>)}</SelectInput></div>}/>
+    {loading?<State kind="loading" title="Memuat Recipe" text="Mengambil data backend…"/>:visible.length===0?<State kind="empty" title={query?"Hasil filter kosong":"Belum ada Recipe"} text="Ubah filter atau buat draft baru."/>:<DataTable head={["Recipe / Menu","Versi","Status Cost",...(canCost?["Cost / Serving","Food Cost","Margin"]:[]),"Outlet Approval","Dihitung"]} wide>{visible.map(r=><Row key={r.id} onClick={()=>void openDetail(r.id)}><Cell><p className="font-medium">{r.name}</p><p className="text-xs text-mute">{r.code} · {r.menuName} / {r.variantName}</p></Cell><Cell><span className="mono">v{r.versionNo??"—"}</span><div className="mt-1"><StatusBadge label={r.isArchived?"archived":r.status??"draft"}/></div></Cell><Cell><Badge tone={r.costingComplete?"olive":"amber"}>{r.costingComplete?"Lengkap":"Belum lengkap"}</Badge></Cell>{canCost&&<><Cell className="mono text-right">{money(r.costPerServing)}</Cell><Cell className="text-right">{percent(r.foodCostPercentage)}</Cell><Cell className="text-right">{percent(r.grossMarginPercentage)}</Cell></>}<Cell>{r.approvedOutletName??"Belum disetujui"}</Cell><Cell className="text-mute">{date(r.calculatedAt)}</Cell></Row>)}</DataTable>}</Card>
+    <Drawer open={Boolean(detailId)} onClose={()=>{setDetailId("");setDetail(null)}} title={detail?.header.name??"Detail Recipe"} sub={detail?`${detail.header.code} · ${detail.menu.name} / ${detail.variant.name}`:undefined}>{detailLoading?<State kind="loading" title="Memuat detail" text="Mengambil komposisi dan histori…"/>:detailError?<State kind="error" title="Detail gagal" text={detailError} action="Coba lagi" onAction={()=>void openDetail(detailId)}/>:detail&&<div className="space-y-5">{actionError&&<Alert text={actionError} onRetry={()=>void openDetail(detail.header.id)}/>}<div className="flex justify-between"><StatusBadge label={detail.header.isArchived?"archived":detail.selectedVersion?.status??"draft"}/><span className="text-xs text-mute">Versi {detail.selectedVersion?.versionNo??"—"}</span></div><Items items={detail.items}/>{canCost?<CostPanel value={detail.costing}/>:<div className="rounded-lg bg-black/[0.03] p-3 text-xs text-mute">Cost, harga jual, dan margin disembunyikan tanpa recipes.cost.read.</div>}<HistoryPanel versions={detail.versions}/><div className="flex flex-wrap gap-2 border-t border-black/5 pt-4">{detail.selectedVersion?.status==="draft"&&can("recipes.update_draft")&&<Btn variant="outline" onClick={startEdit}>Ubah Draft</Btn>}{detail.selectedVersion?.status==="draft"&&can("recipes.recalculate")&&<Btn variant="outline" disabled={!outletId||Boolean(actionLoading)} onClick={()=>void recalculate()}><Calculator className="size-3.5"/>Hitung Ulang</Btn>}{detail.selectedVersion?.status==="draft"&&can("recipes.approve")&&<Btn disabled={!outletId||Boolean(actionLoading)} onClick={()=>setConfirmState({kind:"approve",title:"Setujui Recipe?",text:"Backend menghitung ulang dan membuat approval snapshot immutable.",reason:""})}>Setujui</Btn>}{detail.selectedVersion?.status==="approved"&&can("recipes.revise")&&<Btn variant="outline" onClick={()=>setConfirmState({kind:"revise",title:"Buat revisi?",text:"Approved version tetap immutable; draft versi baru akan dibuat.",reason:""})}>Buat Revisi</Btn>}{!detail.header.isArchived&&can("recipes.archive")&&<Btn variant="danger" onClick={()=>setConfirmState({kind:"archive",title:"Arsipkan Recipe?",text:"Histori Recipe tetap dipertahankan.",reason:""})}>Arsipkan</Btn>}{detail.header.isArchived&&can("recipes.activate")&&<Btn onClick={()=>setConfirmState({kind:"activate",title:"Aktifkan Recipe?",text:"Recipe akan diaktifkan memakai approved version yang valid.",reason:""})}>Aktifkan</Btn>}</div></div>}</Drawer>
+    <Modal open={Boolean(form)} onClose={()=>!submitting&&setForm(null)} title={editing?"Ubah Draft Recipe":"Buat Draft Recipe"} wide>{form&&<Editor form={form} setForm={setForm} lookups={lookups} candidates={candidates} editing={editing} submitting={submitting} error={formError} conflict={conflict} onSubmit={submit} onCancel={()=>setForm(null)}/>}</Modal>
+    <Modal open={Boolean(confirmState)} onClose={()=>!actionLoading&&setConfirmState(null)} title={confirmState?.title??"Konfirmasi"}>{confirmState&&<div className="space-y-4"><p className="text-sm">{confirmState.text}</p>{["revise","archive"].includes(confirmState.kind)&&<Field label="Alasan" required><TextArea autoFocus minLength={3} maxLength={500} value={confirmState.reason} onChange={e=>setConfirmState({...confirmState,reason:e.target.value})}/></Field>}<div className="flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setConfirmState(null)}>Batal</Btn><Btn variant={confirmState.kind==="archive"?"danger":"primary"} disabled={Boolean(actionLoading)||(["revise","archive"].includes(confirmState.kind)&&confirmState.reason.trim().length<3)} onClick={()=>void confirmed()}>{actionLoading?"Memproses…":"Konfirmasi"}</Btn></div></div>}</Modal>
+  </div>
 }
+
+function Editor(p:{form:RecipeForm;setForm:(x:RecipeForm)=>void;lookups:Lookup;candidates:Candidate[];editing:boolean;submitting:boolean;error:string;conflict:boolean;onSubmit:(e:FormEvent)=>void;onCancel:()=>void}){const f=p.form;const line=(i:number,x:Partial<LineForm>)=>p.setForm({...f,items:f.items.map((v,n)=>n===i?{...v,...x}:v)});return <form className="space-y-4" onSubmit={p.onSubmit}>{p.error&&<div role="alert" className="rounded-lg bg-terra/10 p-3 text-xs text-terra"><strong>{p.conflict?"Konflik versi: ":""}</strong>{p.error}</div>}<div className="grid gap-3 sm:grid-cols-2"><Field label="Kode" required><TextInput required disabled={p.editing} minLength={2} maxLength={50} pattern="[A-Z0-9_-]+" value={f.code} onChange={e=>p.setForm({...f,code:e.target.value.toUpperCase()})}/></Field><Field label="Nama" required><TextInput required minLength={2} maxLength={150} value={f.name} onChange={e=>p.setForm({...f,name:e.target.value})}/></Field></div><Field label="Menu / Variant" required hint="Kandidat outlet-aware dari backend"><SelectInput required disabled={p.editing} value={f.menuVariantId} onChange={e=>p.setForm({...f,menuVariantId:e.target.value})}><option value="">Pilih target</option>{p.candidates.map(c=><option key={`${c.menuId}:${c.variantId}`} value={c.variantId??""} disabled={!c.eligible}>{c.menuName}{c.variantName?` — ${c.variantName}`:""}{c.eligible?"":` — ${reason(c.reasons)}`}</option>)}</SelectInput></Field><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"><Decimal label="Yield quantity" value={f.yieldQuantity} set={v=>p.setForm({...f,yieldQuantity:v})}/><Unit label="Yield unit" value={f.yieldUnitId} units={p.lookups.units} set={v=>p.setForm({...f,yieldUnitId:v})}/><Decimal label="Jumlah serving" value={f.servingCount} set={v=>p.setForm({...f,servingCount:v})}/><Decimal label="Ukuran serving" value={f.servingSize} set={v=>p.setForm({...f,servingSize:v})}/><Unit label="Serving unit" value={f.servingUnitId} units={p.lookups.units} set={v=>p.setForm({...f,servingUnitId:v})}/></div><section><div className="mb-2 flex justify-between"><strong className="text-xs">Bahan</strong><Btn type="button" variant="outline" className="px-2 py-1 text-xs" onClick={()=>p.setForm({...f,items:[...f.items,blank()]})}><Plus className="size-3"/>Tambah</Btn></div><div className="space-y-3">{f.items.map((v,i)=>{const ing=p.lookups.ingredients.find(x=>x.id===v.ingredientId);return <div key={i} className="grid grid-cols-2 gap-2 rounded-lg bg-cream p-3 sm:grid-cols-[2fr_1fr_1fr_1fr_auto]"><Field label="Bahan" required><SelectInput required value={v.ingredientId} onChange={e=>line(i,{ingredientId:e.target.value,unitId:""})}><option value="">Pilih bahan</option>{p.lookups.ingredients.map(x=><option key={x.id} value={x.id}>{x.sku} — {x.name}</option>)}</SelectInput></Field><Field label="Unit" required><SelectInput required value={v.unitId} onChange={e=>line(i,{unitId:e.target.value})}><option value="">Unit</option>{p.lookups.units.filter(x=>x.dimension===ing?.dimension).map(x=><option key={x.id} value={x.id}>{x.code}</option>)}</SelectInput></Field><Field label="Net qty" required><TextInput required inputMode="decimal" value={v.netQuantity} onChange={e=>line(i,{netQuantity:e.target.value})}/></Field><Field label="Waste %" required><TextInput required inputMode="decimal" value={v.wastePercentage} onChange={e=>line(i,{wastePercentage:e.target.value})}/></Field><div className="flex items-end"><Btn type="button" variant="ghost" aria-label={`Hapus bahan ${i+1}`} disabled={f.items.length===1} onClick={()=>p.setForm({...f,items:f.items.filter((_,n)=>n!==i)})}>×</Btn></div></div>})}</div><p className="mt-2 text-[11px] text-mute">Konversi, gross quantity, dan cost dihitung backend.</p></section><Field label="Catatan"><TextArea maxLength={5000} value={f.notes} onChange={e=>p.setForm({...f,notes:e.target.value})}/></Field><Field label="Instruksi produksi"><TextArea maxLength={20000} value={f.productionInstructions} onChange={e=>p.setForm({...f,productionInstructions:e.target.value})}/></Field><div className="flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={p.onCancel}>Batal</Btn><Btn disabled={p.submitting}>{p.submitting?"Menyimpan…":"Simpan Draft"}</Btn></div></form>}
+function Items({items}:{items:Item[]}){return <section><h4 className="mb-2 text-xs font-semibold uppercase text-mute">Komposisi Bahan</h4><div className="space-y-2">{items.map(({item,...x})=><div key={item.ingredientId} className="flex flex-wrap justify-between gap-2 rounded-lg bg-cream px-3 py-2 text-xs ring-1 ring-black/5"><span><strong>{x.ingredientName}</strong> <span className="text-mute">{x.ingredientSku}</span></span><span className="mono text-mute">{item.netQuantity} {x.unitCode} · waste {item.wastePercentage}%</span></div>)}</div></section>}
+function CostPanel({value}:{value:Costing|null}){if(!value)return <div className="rounded-lg border border-dashed p-4 text-center text-xs text-mute">Belum ada costing untuk outlet ini.</div>;return <section className="space-y-3"><div className="flex justify-between"><strong className="text-xs uppercase text-mute">Costing Backend</strong><Badge tone={value.status==="complete"?"olive":"amber"}>{value.status}</Badge></div>{value.warningCodes.length>0&&<div role="alert" className="rounded-lg bg-amber-100 p-3 text-xs">{value.warningCodes.join(", ")}</div>}<div className="grid grid-cols-2 gap-3 text-xs"><Metric l="Harga jual efektif" v={money(value.sellingPriceSnapshot)}/><Metric l="Total Recipe" v={money(value.totalRecipeCost)}/><Metric l="Cost / yield" v={money(value.costPerYield)}/><Metric l="Cost / serving" v={money(value.costPerServing)}/><Metric l="Food cost" v={percent(value.foodCostPercentage)}/><Metric l="Profit / margin" v={`${money(value.grossProfit)} / ${percent(value.grossMarginPercentage)}`}/></div><p className="text-[11px] text-mute">Dihitung {date(value.calculatedAt)}{value.isStale?` · stale: ${value.staleSources.join(", ")}`:" · sumber current"}</p></section>}
+function HistoryPanel({versions}:{versions:Version[]}){return <section><h4 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase text-mute"><History className="size-3.5"/>Histori Versi</h4>{versions.map(v=><div key={v.id} className="mb-2 flex justify-between rounded-lg border border-black/5 p-3 text-xs"><span><strong>Versi {v.versionNo}</strong><small className="ml-2 text-mute">{v.approvedAt?date(v.approvedAt):v.revisionReason??"Draft"}</small></span><StatusBadge label={v.status}/></div>)}<p className="text-[11px] text-mute">Backend belum menyediakan endpoint detail per versi historis.</p></section>}
+function Decimal({label,value,set}:{label:string;value:string;set:(v:string)=>void}){return <Field label={label} required><TextInput required inputMode="decimal" value={value} onChange={e=>set(e.target.value)}/></Field>};function Unit({label,value,units,set}:{label:string;value:string;units:Lookup["units"];set:(v:string)=>void}){return <Field label={label}><SelectInput value={value} onChange={e=>set(e.target.value)}><option value="">Tanpa unit</option>{units.map(x=><option key={x.id} value={x.id}>{x.code}</option>)}</SelectInput></Field>}
+function Kpi({label,value,warning=false}:{label:string;value:number;warning?:boolean}){return <Card className="p-3.5"><div className="flex items-center gap-2 text-xs text-mute">{warning?<AlertTriangle className="size-3.5 text-terra"/>:<CheckCircle2 className="size-3.5 text-olive"/>}{label}</div><p className="mono mt-2 text-xl font-semibold">{value}</p></Card>};function Metric({l,v}:{l:string;v:string}){return <div><p className="text-mute">{l}</p><p className="mono font-medium">{v}</p></div>}
+function Alert({text,onRetry}:{text:string;onRetry:()=>void}){return <div role="alert" className="flex justify-between rounded-lg bg-terra/10 px-3 py-2 text-xs text-terra"><span>{text}</span><Btn variant="ghost" className="px-2 py-1" onClick={onRetry}><RefreshCw className="size-3"/>Coba lagi</Btn></div>};function State({kind,title,text,action,onAction}:{kind:"loading"|"empty"|"forbidden"|"error";title:string;text:string;action?:string;onAction?:()=>void}){return <div className="grid min-h-48 place-items-center p-8 text-center" role={kind==="error"?"alert":kind==="loading"?"status":undefined}><div>{kind==="loading"&&<span className="mx-auto mb-3 block size-7 animate-spin rounded-full border-2 border-olive/20 border-t-olive"/>}<strong className="block text-sm">{title}</strong><p className="mt-1 text-xs text-mute">{text}</p>{action&&<Btn className="mt-4" onClick={onAction}>{action}</Btn>}</div></div>}
+function money(v?:string|null){return v==null?"—":new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:2}).format(Number(v))}function percent(v?:string|null){return v==null?"—":`${Number(v).toLocaleString("id-ID",{maximumFractionDigits:2})}%`}function date(v?:string|null){return v?new Date(v).toLocaleString("id-ID"):"—"}function msg(e:unknown){return e instanceof Error?e.message:"Operasi Recipe gagal."}function reason(xs:string[]){const x:Record<string,string>={NO_VARIANT:"belum ada variant",NO_OUTLET_SETTING:"belum dikonfigurasi",OUTLET_SETTING_INACTIVE:"konfigurasi tidak aktif",NOT_AVAILABLE_AT_OUTLET:"tidak tersedia",CATEGORY_INACTIVE:"kategori tidak aktif",MENU_INACTIVE:"menu tidak aktif",VARIANT_INACTIVE:"variant tidak aktif",RECIPE_EXISTS:"sudah memiliki Recipe"};return xs.map(v=>x[v]??v).join("; ")}
