@@ -1,161 +1,139 @@
-import { Plus, Search } from "lucide-react";
-import { useState } from "react";
+import { Archive, PackageSearch, Plus, RefreshCw, Search, ShoppingCart, Store } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Btn, Card, CardHeader, DataTable, Row, Cell, Field, TextInput, SelectInput, TextArea, StatusBadge, Badge, Modal, Progress } from "@/components/ui";
-import { SUPPLIERS, SUPPLIER_CATALOG, INGREDIENTS, UNITS, ingredientName, idr, type Supplier, type CatalogItem } from "@/lib/mock-data";
+import { Badge, Btn, Card, CardHeader, Cell, DataTable, Drawer, Field, Modal, Row, SelectInput, StatusBadge, Tabs, TextArea, TextInput } from "@/components/ui";
+import { useAuth } from "@/contexts/auth-context";
+import { ApiError } from "@/lib/api/types";
+
+type Supplier = { id: string; code: string; name: string; taxId: string | null; contactName: string | null; phone: string | null; email: string | null; address: string | null; paymentTermDays: number; leadTimeDays: number; isActive: boolean; activeCatalogCount: number; purchaseOrderCount: number };
+type Catalog = { id: string; ingredientId: string; ingredientSku: string; ingredientName: string; baseUnitId: string; purchaseUnitId: string; purchaseUnitCode: string; purchaseUnitName: string; supplierSku: string | null; conversionToBase: number; lastPrice: number | null; unitCostBase: number | null; minimumOrderQty: number; isPreferred: boolean; isActive: boolean };
+type Lookups = { ingredients: { id: string; sku: string; name: string; baseUnitId: string; baseUnitCode: string; dimension: string }[]; units: { id: string; code: string; name: string; dimension: string }[] };
+type PurchaseOrder = { id: string; outletName: string; poNo: string; orderDate: string; expectedDate: string | null; status: string; grandTotal: number; currencyCode: string; itemCount: number };
+type SupplierForm = { code: string; name: string; taxId: string; contactName: string; phone: string; email: string; address: string; paymentTermDays: number; leadTimeDays: number };
+type CatalogForm = { ingredientId: string; purchaseUnitId: string; supplierSku: string; conversionToBase: number; lastPrice: string; minimumOrderQty: number; isPreferred: boolean };
+
+const EMPTY_SUPPLIER: SupplierForm = { code: "", name: "", taxId: "", contactName: "", phone: "", email: "", address: "", paymentTermDays: 0, leadTimeDays: 0 };
+const EMPTY_CATALOG: CatalogForm = { ingredientId: "", purchaseUnitId: "", supplierSku: "", conversionToBase: 1, lastPrice: "", minimumOrderQty: 1, isPreferred: false };
+const EMPTY_LOOKUPS: Lookups = { ingredients: [], units: [] };
 
 export function SuppliersView() {
-  const [suppliers, setSuppliers] = useState<Supplier[]>(SUPPLIERS);
-  const [catalog, setCatalog] = useState<CatalogItem[]>(SUPPLIER_CATALOG);
-  const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
-  const [modal, setModal] = useState<null | { edit?: Supplier }>(null);
-  const [catalogOf, setCatalogOf] = useState<Supplier | null>(null);
+  const { api, session } = useAuth();
+  const can = useCallback((permission: string) => Boolean(session?.user.permissions.includes(permission)), [session]);
+  const allowed = can("suppliers.read");
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]), [query, setQuery] = useState(""), [status, setStatus] = useState("active");
+  const [loading, setLoading] = useState(true), [refreshing, setRefreshing] = useState(false), [error, setError] = useState(""), [reload, setReload] = useState(0);
+  const [selected, setSelected] = useState<Supplier | null>(null), [detail, setDetail] = useState<Supplier | null>(null), [detailTab, setDetailTab] = useState("profil");
+  const [catalog, setCatalog] = useState<Catalog[]>([]), [orders, setOrders] = useState<PurchaseOrder[]>([]), [lookups, setLookups] = useState<Lookups>(EMPTY_LOOKUPS);
+  const [detailLoading, setDetailLoading] = useState(false), [detailError, setDetailError] = useState(""), [catalogError, setCatalogError] = useState(""), [orderError, setOrderError] = useState("");
+  const [supplierForm, setSupplierForm] = useState<SupplierForm | null>(null), [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [catalogForm, setCatalogForm] = useState<CatalogForm | null>(null), [editingCatalog, setEditingCatalog] = useState<Catalog | null>(null);
+  const [submitting, setSubmitting] = useState(false), [formError, setFormError] = useState(""), [conflict, setConflict] = useState(false);
+  const [confirm, setConfirm] = useState<{ kind: "supplier" | "catalog"; item: Supplier | Catalog } | null>(null);
 
-  const rows = suppliers.filter((s) => `${s.code} ${s.name}`.toLowerCase().includes(q.toLowerCase()) && (statusFilter === "all" || (statusFilter === "active") === s.active));
-
-  const save = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const fd = new FormData(e.currentTarget);
-    const email = String(fd.get("email") ?? "");
-    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast.error("Format email tidak valid"); return; }
-    const data = {
-      name: String(fd.get("name")), contact: String(fd.get("contact") || "") || undefined, phone: String(fd.get("phone") || "") || undefined,
-      email: email || undefined, termsDays: Number(fd.get("terms")), leadTimeDays: Number(fd.get("lead")), address: String(fd.get("address") || "") || undefined,
-    };
-    if (modal?.edit) {
-      setSuppliers((p) => p.map((s) => (s.code === modal.edit!.code ? { ...s, ...data } : s)));
-      toast.success("Supplier diperbarui");
-    } else {
-      const code = String(fd.get("code")).toUpperCase();
-      setSuppliers((p) => [...p, { code, ...data, active: true, perf: 100 }]);
-      toast.success("Supplier ditambahkan");
+  const load = useCallback(async () => {
+    if (!allowed) { setLoading(false); return; }
+    setRefreshing(true); setError("");
+    try { const rows = await api<Supplier[]>("/suppliers"); setSuppliers(rows.map(normalizeSupplier)); }
+    catch (cause) { setError(message(cause, "Supplier tidak dapat dimuat.")); }
+    finally { setLoading(false); setRefreshing(false); }
+  }, [allowed, api]);
+  useEffect(() => { void reload; void load(); }, [load, reload]);
+  useEffect(() => {
+    if (!selected) { setDetail(null); setCatalog([]); setOrders([]); return; }
+    let active = true; setDetailLoading(true); setDetailError(""); setCatalogError(""); setOrderError("");
+    const requests: Promise<void>[] = [
+      api<Supplier>(`/suppliers/${selected.id}`).then((value) => { if (active) setDetail(normalizeSupplier(value)); }).catch((cause) => { if (active) setDetailError(message(cause, "Profil Supplier tidak dapat dimuat.")); }),
+    ];
+    if (can("suppliers.catalog.read")) {
+      requests.push(api<Catalog[]>(`/suppliers/${selected.id}/catalog`).then((value) => { if (active) setCatalog(value.map(normalizeCatalog)); }).catch((cause) => { if (active) setCatalogError(message(cause, "Katalog tidak dapat dimuat.")); }));
+      requests.push(api<Lookups>("/suppliers/lookups").then((value) => { if (active) setLookups(value); }).catch((cause) => { if (active) setCatalogError(message(cause, "Lookup katalog tidak dapat dimuat.")); }));
     }
-    setModal(null);
-  };
+    if (can("purchase_orders.read")) requests.push(api<PurchaseOrder[]>(`/purchase-orders?supplierId=${encodeURIComponent(selected.id)}`).then((value) => { if (active) setOrders(value.map(normalizeOrder)); }).catch((cause) => { if (active) setOrderError(message(cause, "Riwayat PO tidak dapat dimuat.")); }));
+    Promise.allSettled(requests).finally(() => { if (active) setDetailLoading(false); });
+    return () => { active = false; };
+  }, [api, can, selected, reload]);
 
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Supplier</h1>
-          <p className="mt-1 text-[13px] text-mute">Pemasok dan katalog bahan per supplier</p>
-        </div>
-        <Btn onClick={() => setModal({})}><Plus className="size-3.5" /> Tambah Supplier</Btn>
-      </div>
+  const rows = useMemo(() => suppliers.filter((row) => (status === "all" || row.isActive === (status === "active")) && `${row.code} ${row.name} ${row.contactName ?? ""} ${row.email ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())), [suppliers, query, status]);
+  const hasFilters = Boolean(query.trim() || status !== "all");
+  function openSupplier(row?: Supplier) {
+    setFormError(""); setConflict(false); setEditingSupplier(row ?? null);
+    setSupplierForm(row ? { code: row.code, name: row.name, taxId: row.taxId ?? "", contactName: row.contactName ?? "", phone: row.phone ?? "", email: row.email ?? "", address: row.address ?? "", paymentTermDays: row.paymentTermDays, leadTimeDays: row.leadTimeDays } : { ...EMPTY_SUPPLIER });
+  }
+  function openCatalog(row?: Catalog) {
+    setFormError(""); setConflict(false); setEditingCatalog(row ?? null);
+    setCatalogForm(row ? { ingredientId: row.ingredientId, purchaseUnitId: row.purchaseUnitId, supplierSku: row.supplierSku ?? "", conversionToBase: row.conversionToBase, lastPrice: row.lastPrice?.toString() ?? "", minimumOrderQty: row.minimumOrderQty, isPreferred: row.isPreferred } : { ...EMPTY_CATALOG });
+  }
+  function closeForms(force = false) { if (submitting && !force) return; setSupplierForm(null); setCatalogForm(null); setEditingSupplier(null); setEditingCatalog(null); setFormError(""); }
+  async function saveSupplier(event: FormEvent) {
+    event.preventDefault(); if (!supplierForm) return; setSubmitting(true); setFormError(""); setConflict(false);
+    const body = { ...supplierForm, code: supplierForm.code.trim().toUpperCase(), email: clean(supplierForm.email)?.toLowerCase(), taxId: clean(supplierForm.taxId), contactName: clean(supplierForm.contactName), phone: clean(supplierForm.phone), address: clean(supplierForm.address), paymentTermDays: Number(supplierForm.paymentTermDays), leadTimeDays: Number(supplierForm.leadTimeDays) };
+    try { await api(editingSupplier ? `/suppliers/${editingSupplier.id}` : "/suppliers", { method: editingSupplier ? "PATCH" : "POST", body: JSON.stringify(body) }); toast.success(editingSupplier ? "Supplier berhasil diperbarui" : "Supplier berhasil ditambahkan"); closeForms(true); await load(); }
+    catch (cause) { setConflict(cause instanceof ApiError && cause.status === 409); setFormError(message(cause, "Supplier gagal disimpan.")); }
+    finally { setSubmitting(false); }
+  }
+  async function saveCatalog(event: FormEvent) {
+    event.preventDefault(); if (!selected || !catalogForm) return; setSubmitting(true); setFormError(""); setConflict(false);
+    const body = { ...catalogForm, supplierSku: clean(catalogForm.supplierSku), conversionToBase: Number(catalogForm.conversionToBase), lastPrice: Number(catalogForm.lastPrice), minimumOrderQty: Number(catalogForm.minimumOrderQty) };
+    try { await api(editingCatalog ? `/suppliers/${selected.id}/catalog/${editingCatalog.id}` : `/suppliers/${selected.id}/catalog`, { method: editingCatalog ? "PATCH" : "POST", body: JSON.stringify(body) }); toast.success(editingCatalog ? "Katalog berhasil diperbarui" : "Item katalog berhasil ditambahkan"); closeForms(true); await refreshDetail(); }
+    catch (cause) { setConflict(cause instanceof ApiError && cause.status === 409); setFormError(message(cause, "Katalog gagal disimpan.")); }
+    finally { setSubmitting(false); }
+  }
+  async function refreshDetail() {
+    if (!selected) return;
+    const [supplierRow, catalogRows] = await Promise.all([api<Supplier>(`/suppliers/${selected.id}`), api<Catalog[]>(`/suppliers/${selected.id}/catalog`)]);
+    setDetail(normalizeSupplier(supplierRow)); setCatalog(catalogRows.map(normalizeCatalog)); setReload((value) => value + 1);
+  }
+  async function toggle() {
+    if (!confirm || !selected && confirm.kind === "catalog") return; setSubmitting(true); setFormError("");
+    const endpoint = confirm.kind === "supplier"
+      ? `/suppliers/${confirm.item.id}/${confirm.item.isActive ? "archive" : "activate"}`
+      : `/suppliers/${selected!.id}/catalog/${confirm.item.id}/${confirm.item.isActive ? "archive" : "activate"}`;
+    try { await api(endpoint, { method: "POST" }); toast.success(`${confirm.kind === "supplier" ? "Supplier" : "Katalog"} berhasil ${confirm.item.isActive ? "diarsipkan" : "diaktifkan"}`); setConfirm(null); if (confirm.kind === "supplier") { setSelected(null); await load(); } else await refreshDetail(); }
+    catch (cause) { setFormError(message(cause, "Status gagal diperbarui.")); }
+    finally { setSubmitting(false); }
+  }
 
-      <Card className="overflow-hidden">
-        <CardHeader
-          title="Daftar Supplier"
-          sub={`${rows.length} supplier`}
-          action={
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute/70" />
-                <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari supplier…" className="w-44 pl-8" />
-              </div>
-              <SelectInput value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-32">
-                <option value="active">Aktif</option><option value="archived">Nonaktif</option><option value="all">Semua</option>
-              </SelectInput>
-            </div>
-          }
-        />
-        <DataTable head={["Kode", "Nama", "Kontak", "Termin", "Lead Time", "Performa", "Status", ""]} wide>
-          {rows.map((s) => (
-            <Row key={s.code}>
-              <Cell className="mono text-ink/90">{s.code}</Cell>
-              <Cell className="font-medium">{s.name}</Cell>
-              <Cell className="text-mute">{s.contact ?? "—"}{s.phone && <span className="block text-[11px]">{s.phone}</span>}</Cell>
-              <Cell className="mono text-right">{s.termsDays} hari</Cell>
-              <Cell className="mono text-right">{s.leadTimeDays} hari</Cell>
-              <Cell className="w-32"><div className="flex items-center gap-2"><div className="flex-1"><Progress value={s.perf} warn={s.perf < 85} /></div><span className="mono text-[11px] text-mute">{s.perf}%</span></div></Cell>
-              <Cell><StatusBadge label={s.active ? "active" : "archived"} /></Cell>
-              <Cell>
-                <div className="flex gap-1">
-                  <Btn variant="ghost" className="px-2 py-1 text-[12px]" onClick={() => setCatalogOf(s)}>Katalog</Btn>
-                  <Btn variant="ghost" className="px-2 py-1 text-[12px]" onClick={() => setModal({ edit: s })}>Ubah</Btn>
-                  <Btn variant="ghost" className="px-2 py-1 text-[12px]" onClick={() => { setSuppliers((p) => p.map((x) => (x.code === s.code ? { ...x, active: !x.active } : x))); toast.success(s.active ? "Supplier diarsipkan" : "Supplier diaktifkan"); }}>
-                    {s.active ? "Arsipkan" : "Aktifkan"}
-                  </Btn>
-                </div>
-              </Cell>
-            </Row>
-          ))}
-        </DataTable>
-      </Card>
-
-      {/* Katalog supplier */}
-      <Modal open={!!catalogOf} onClose={() => setCatalogOf(null)} title={`Katalog — ${catalogOf?.name ?? ""}`} wide>
-        {catalogOf && (
-          <div className="space-y-3">
-            <DataTable head={["Bahan", "Purchase Unit", "Harga", "Konversi", "MOQ", "Preferred", "Status", ""]} wide>
-              {catalog.filter((c) => c.supplierCode === catalogOf.code).map((c) => (
-                <Row key={c.ingredientSku}>
-                  <Cell className="font-medium">{ingredientName(c.ingredientSku)}</Cell>
-                  <Cell className="mono">{c.purchaseUnit}</Cell>
-                  <Cell className="mono text-right">{idr(c.price)}</Cell>
-                  <Cell className="mono text-right">{c.conversion}</Cell>
-                  <Cell className="mono text-right">{c.moq}</Cell>
-                  <Cell>{c.preferred ? <Badge tone="olive">preferred</Badge> : <span className="text-mute">—</span>}</Cell>
-                  <Cell><StatusBadge label={c.active ? "active" : "archived"} /></Cell>
-                  <Cell>
-                    <Btn variant="ghost" className="px-2 py-1 text-[12px]" onClick={() => { setCatalog((p) => p.map((x) => (x.supplierCode === c.supplierCode && x.ingredientSku === c.ingredientSku ? { ...x, active: !x.active } : x))); toast.success(c.active ? "Item diarsipkan" : "Item diaktifkan"); }}>
-                      {c.active ? "Arsipkan" : "Aktifkan"}
-                    </Btn>
-                  </Cell>
-                </Row>
-              ))}
-            </DataTable>
-            {catalogOf.active ? (
-              <form
-                className="flex flex-wrap items-center gap-2 border-t border-black/5 pt-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  const sku = String(fd.get("ing"));
-                  const ing = INGREDIENTS.find((i) => i.sku === sku)!;
-                  const unit = UNITS.find((u) => u.code === String(fd.get("unit")))!;
-                  const baseDim = UNITS.find((u) => u.code === ing.baseUnit)?.dimension;
-                  if (unit.dimension !== baseDim) { toast.error("Purchase unit harus memiliki dimension yang sama dengan bahan"); return; }
-                  setCatalog((p) => [...p, { supplierCode: catalogOf.code, ingredientSku: sku, purchaseUnit: unit.code, price: Number(fd.get("price")), conversion: Number(fd.get("conv")), moq: Number(fd.get("moq")), preferred: fd.get("pref") === "on", active: true }]);
-                  (e.target as HTMLFormElement).reset();
-                  toast.success("Item katalog ditambahkan");
-                }}
-              >
-                <SelectInput name="ing" className="w-44" required>
-                  {INGREDIENTS.filter((i) => i.active && !catalog.some((c) => c.supplierCode === catalogOf.code && c.ingredientSku === i.sku)).map((i) => <option key={i.sku} value={i.sku}>{i.name}</option>)}
-                </SelectInput>
-                <SelectInput name="unit" className="w-24">{UNITS.filter((u) => u.active).map((u) => <option key={u.code}>{u.code}</option>)}</SelectInput>
-                <TextInput name="price" type="number" min={0} step={0.01} placeholder="Harga" className="w-28" required />
-                <TextInput name="conv" type="number" min={0.001} step={0.001} placeholder="Konversi" className="w-24" required />
-                <TextInput name="moq" type="number" min={0} placeholder="MOQ" className="w-20" required />
-                <label className="flex items-center gap-1.5 text-[12px]"><input type="checkbox" name="pref" className="accent-[oklch(0.52_0.065_128)]" /> Preferred</label>
-                <Btn type="submit" className="px-2.5 py-1.5 text-[12px]"><Plus className="size-3" /> Tambah</Btn>
-              </form>
-            ) : (
-              <p className="rounded-lg bg-terra/10 px-3 py-2 text-[12.5px] text-terra">Katalog tidak dapat ditambah pada supplier nonaktif.</p>
-            )}
-          </div>
-        )}
-      </Modal>
-
-      {/* Form supplier */}
-      <Modal open={!!modal} onClose={() => setModal(null)} title={modal?.edit ? "Ubah Supplier" : "Tambah Supplier"} wide>
-        <form onSubmit={save} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Kode" required hint="Maks 40 karakter, uppercase"><TextInput name="code" required maxLength={40} defaultValue={modal?.edit?.code} disabled={!!modal?.edit} onChange={(e) => (e.target.value = e.target.value.toUpperCase())} /></Field>
-            <Field label="Nama" required><TextInput name="name" required defaultValue={modal?.edit?.name} /></Field>
-            <Field label="NPWP / Tax ID"><TextInput name="npwp" defaultValue={modal?.edit?.npwp} /></Field>
-            <Field label="Nama kontak"><TextInput name="contact" defaultValue={modal?.edit?.contact} /></Field>
-            <Field label="Telepon"><TextInput name="phone" type="tel" defaultValue={modal?.edit?.phone} /></Field>
-            <Field label="Email"><TextInput name="email" type="email" defaultValue={modal?.edit?.email} /></Field>
-            <Field label="Termin pembayaran (hari)"><TextInput name="terms" type="number" min={0} defaultValue={modal?.edit?.termsDays ?? 14} /></Field>
-            <Field label="Lead time (hari)"><TextInput name="lead" type="number" min={0} defaultValue={modal?.edit?.leadTimeDays ?? 2} /></Field>
-          </div>
-          <Field label="Alamat"><TextArea name="address" defaultValue={modal?.edit?.address} /></Field>
-          <div className="flex justify-end gap-2 pt-2"><Btn type="button" variant="ghost" onClick={() => setModal(null)}>Batal</Btn><Btn type="submit">Simpan</Btn></div>
-        </form>
-      </Modal>
-    </div>
-  );
+  if (!allowed) return <State kind="forbidden" title="Akses Supplier dibatasi" text="Permission suppliers.read diperlukan." />;
+  if (loading) return <State kind="loading" title="Memuat Supplier" text="Data tenant sedang diambil dari backend." />;
+  if (error && !suppliers.length) return <State kind="error" title="Supplier tidak dapat dimuat" text={error} action="Coba lagi" onAction={() => setReload((value) => value + 1)} />;
+  return <div className="min-w-0">
+    <header className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Supplier</h1><p className="mt-1 text-[13px] text-mute">Pemasok, katalog bahan, dan histori pembelian</p></div><div className="flex items-center gap-2">{refreshing && <span className="text-xs text-mute" role="status">Memperbarui…</span>}<Btn variant="outline" className="px-2.5" aria-label="Muat ulang" onClick={() => setReload((value) => value + 1)}><RefreshCw className="size-3.5" /></Btn>{can("suppliers.create") && <Btn onClick={() => openSupplier()}><Plus className="size-3.5" />Tambah Supplier</Btn>}</div></header>
+    <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4"><Kpi icon={<Store />} label="Total Supplier" value={suppliers.length} /><Kpi icon={<Archive />} label="Supplier Aktif" value={suppliers.filter((row) => row.isActive).length} /><Kpi icon={<PackageSearch />} label="Katalog Aktif" value={suppliers.reduce((sum, row) => sum + row.activeCatalogCount, 0)} /><Kpi icon={<ShoppingCart />} label="Purchase Order" value={suppliers.reduce((sum, row) => sum + row.purchaseOrderCount, 0)} /></div>
+    {error && <div className="mb-4 rounded-xl bg-terra/10 px-4 py-3 text-sm text-terra" role="alert">{error}</div>}
+    <Card className="min-w-0 overflow-hidden"><CardHeader title="Daftar Supplier" sub={`${rows.length} supplier`} action={<div className="flex flex-wrap items-center gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute" /><TextInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari supplier…" className="w-44 pl-8 sm:w-56" /></div><SelectInput value={status} onChange={(event) => setStatus(event.target.value)} className="w-32"><option value="active">Aktif</option><option value="archived">Diarsipkan</option><option value="all">Semua</option></SelectInput></div>} />{rows.length ? <DataTable head={["Kode", "Nama", "Kontak", "Termin", "Lead Time", "Katalog", "PO", "Status", ""]} wide>{rows.map((row) => <Row key={row.id} onClick={() => { setSelected(row); setDetailTab("profil"); }}><Cell className="mono font-medium">{row.code}</Cell><Cell className="font-medium">{row.name}</Cell><Cell>{row.contactName ?? "—"}<small className="block text-[11px] text-mute">{row.phone ?? row.email ?? "Tanpa kontak"}</small></Cell><Cell className="mono text-right">{row.paymentTermDays} hari</Cell><Cell className="mono text-right">{row.leadTimeDays} hari</Cell><Cell className="mono text-right">{row.activeCatalogCount}</Cell><Cell className="mono text-right">{row.purchaseOrderCount}</Cell><Cell><StatusBadge label={row.isActive ? "active" : "archived"} /></Cell><Cell><Actions allowed={can("suppliers.update")} active={row.isActive} onEdit={() => openSupplier(row)} onToggle={() => { setFormError(""); setConfirm({ kind: "supplier", item: row }); }} /></Cell></Row>)}</DataTable> : <State kind="empty" title={hasFilters ? "Tidak ada hasil" : "Belum ada Supplier"} text={hasFilters ? "Ubah pencarian atau filter aktif." : "Tambahkan Supplier pertama untuk tenant ini."} />}</Card>
+    <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title={selected?.name ?? "Detail Supplier"} sub={selected?.code}>{selected && <SupplierDrawer supplier={detail ?? selected} tab={detailTab} setTab={setDetailTab} loading={detailLoading} detailError={detailError} catalogError={catalogError} orderError={orderError} catalog={catalog} orders={orders} canCatalogRead={can("suppliers.catalog.read")} canCatalogManage={can("suppliers.catalog.manage")} canOrderRead={can("purchase_orders.read")} onAddCatalog={() => openCatalog()} onEditCatalog={openCatalog} onToggleCatalog={(row) => { setFormError(""); setConfirm({ kind: "catalog", item: row }); }} onRetry={() => setReload((value) => value + 1)} />}</Drawer>
+    <Modal open={Boolean(supplierForm)} onClose={closeForms} title={editingSupplier ? "Ubah Supplier" : "Tambah Supplier"} wide>{supplierForm && <SupplierEditor form={supplierForm} setForm={setSupplierForm} error={formError} conflict={conflict} submitting={submitting} onSubmit={saveSupplier} onCancel={closeForms} />}</Modal>
+    <Modal open={Boolean(catalogForm)} onClose={closeForms} title={editingCatalog ? "Ubah Item Katalog" : "Tambah Item Katalog"} wide>{catalogForm && <CatalogEditor form={catalogForm} setForm={setCatalogForm} lookups={lookups} editing={Boolean(editingCatalog)} error={formError} conflict={conflict} submitting={submitting} onSubmit={saveCatalog} onCancel={closeForms} />}</Modal>
+    <Modal open={Boolean(confirm)} onClose={() => !submitting && setConfirm(null)} title={confirm?.item.isActive ? "Arsipkan data?" : "Aktifkan kembali?"}><p className="text-sm text-mute">{confirm?.kind === "supplier" && confirm.item.isActive ? "Katalog aktif ikut dinonaktifkan. PO dan GR historis tetap utuh." : "Perubahan status akan divalidasi backend."}</p><FormError text={formError} conflict={false} /><div className="mt-5 flex justify-end gap-2"><Btn variant="ghost" disabled={submitting} onClick={() => setConfirm(null)}>Batal</Btn><Btn variant={confirm?.item.isActive ? "danger" : "primary"} disabled={submitting} onClick={() => void toggle()}>{submitting ? "Memproses…" : confirm?.item.isActive ? "Arsipkan" : "Aktifkan"}</Btn></div></Modal>
+  </div>;
 }
+
+function SupplierDrawer(p: { supplier: Supplier; tab: string; setTab: (value: string) => void; loading: boolean; detailError: string; catalogError: string; orderError: string; catalog: Catalog[]; orders: PurchaseOrder[]; canCatalogRead: boolean; canCatalogManage: boolean; canOrderRead: boolean; onAddCatalog: () => void; onEditCatalog: (row: Catalog) => void; onToggleCatalog: (row: Catalog) => void; onRetry: () => void }) {
+  if (p.loading) return <State kind="loading" title="Memuat detail Supplier" text="Profil, katalog, dan histori sedang diambil." />;
+  return <div className="space-y-4"><Tabs value={p.tab} onChange={p.setTab} tabs={[{ id: "profil", label: "Profil" }, { id: "katalog", label: "Katalog", count: p.catalog.length }, { id: "po", label: "Riwayat PO", count: p.orders.length }]} />{p.tab === "profil" && (p.detailError ? <State kind="error" title="Profil gagal dimuat" text={p.detailError} action="Coba lagi" onAction={p.onRetry} /> : <Profile supplier={p.supplier} />)}{p.tab === "katalog" && (!p.canCatalogRead ? <State kind="forbidden" title="Akses katalog dibatasi" text="Permission suppliers.catalog.read diperlukan." /> : p.catalogError ? <State kind="error" title="Katalog gagal dimuat" text={p.catalogError} action="Coba lagi" onAction={p.onRetry} /> : <CatalogPanel rows={p.catalog} supplierActive={p.supplier.isActive} canManage={p.canCatalogManage} onAdd={p.onAddCatalog} onEdit={p.onEditCatalog} onToggle={p.onToggleCatalog} />)}{p.tab === "po" && (!p.canOrderRead ? <State kind="forbidden" title="Riwayat PO tidak tersedia" text="Endpoint tersedia, tetapi permission purchase_orders.read diperlukan." /> : p.orderError ? <State kind="error" title="Riwayat PO gagal dimuat" text={p.orderError} action="Coba lagi" onAction={p.onRetry} /> : <Orders rows={p.orders} />)}</div>;
+}
+function Profile({ supplier: row }: { supplier: Supplier }) { return <div className="space-y-4"><div className="flex justify-between"><StatusBadge label={row.isActive ? "active" : "archived"} /><Badge tone="neutral">{row.purchaseOrderCount} PO</Badge></div><div className="grid grid-cols-2 gap-3"><Metric label="Nama kontak" value={row.contactName ?? "Belum diisi"} /><Metric label="Telepon" value={row.phone ?? "Belum diisi"} /><Metric label="Email" value={row.email ?? "Belum diisi"} /><Metric label="NPWP / Tax ID" value={row.taxId ?? "Belum diisi"} /><Metric label="Termin" value={`${row.paymentTermDays} hari`} /><Metric label="Lead time" value={`${row.leadTimeDays} hari`} /></div><section><h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-mute">Alamat</h3><p className="rounded-lg bg-cream p-3 text-sm ring-1 ring-black/5">{row.address ?? "Belum diisi"}</p></section></div>; }
+function CatalogPanel(p: { rows: Catalog[]; supplierActive: boolean; canManage: boolean; onAdd: () => void; onEdit: (row: Catalog) => void; onToggle: (row: Catalog) => void }) { return <div className="space-y-3"><div className="flex justify-between gap-3"><p className="text-xs text-mute">Harga dan unit cost berasal dari katalog backend.</p>{p.canManage && p.supplierActive && <Btn onClick={p.onAdd}><Plus className="size-3.5" />Item Katalog</Btn>}</div>{p.rows.length ? <DataTable head={["Bahan", "Unit", "Harga", "Cost Base", "MOQ", "Konversi", "Status", ""]} wide>{p.rows.map((row) => <Row key={row.id}><Cell><strong>{row.ingredientName}</strong><small className="block text-[11px] text-mute">{row.ingredientSku}{row.supplierSku ? ` · ${row.supplierSku}` : ""}</small></Cell><Cell className="mono">{row.purchaseUnitCode}</Cell><Cell className="mono text-right">{money(row.lastPrice)}</Cell><Cell className="mono text-right">{money(row.unitCostBase)}</Cell><Cell className="mono text-right">{number(row.minimumOrderQty)}</Cell><Cell className="mono text-right">{number(row.conversionToBase)}</Cell><Cell><StatusBadge label={row.isActive ? "active" : "archived"} />{row.isPreferred && <Badge tone="olive" className="ml-1">preferred</Badge>}</Cell><Cell><Actions allowed={p.canManage} active={row.isActive} editDisabled={!row.isActive} onEdit={() => p.onEdit(row)} onToggle={() => p.onToggle(row)} /></Cell></Row>)}</DataTable> : <State kind="empty" title="Katalog masih kosong" text={p.supplierActive ? "Tambahkan bahan yang dipasok Supplier ini." : "Supplier nonaktif tidak dapat menerima katalog baru."} />}</div>; }
+function Orders({ rows }: { rows: PurchaseOrder[] }) { if (!rows.length) return <State kind="empty" title="Belum ada Purchase Order" text="Tidak ada PO historis untuk Supplier ini." />; return <DataTable head={["PO", "Outlet", "Tanggal", "Item", "Total", "Status"]} wide>{rows.map((row) => <Row key={row.id}><Cell className="mono font-medium">{row.poNo}</Cell><Cell>{row.outletName}</Cell><Cell>{date(row.orderDate)}</Cell><Cell className="mono text-right">{row.itemCount}</Cell><Cell className="mono text-right">{money(row.grandTotal)}</Cell><Cell><StatusBadge label={row.status} /></Cell></Row>)}</DataTable>; }
+
+function SupplierEditor(p: { form: SupplierForm; setForm: (value: SupplierForm) => void; error: string; conflict: boolean; submitting: boolean; onSubmit: (event: FormEvent) => void; onCancel: () => void }) { const f = p.form; return <form onSubmit={p.onSubmit} className="space-y-3"><FormError text={p.error} conflict={p.conflict} /><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="Kode" hint="Otomatis uppercase" required><TextInput required minLength={2} maxLength={40} pattern="[A-Za-z0-9_-]+" value={f.code} onChange={(event) => p.setForm({ ...f, code: event.target.value.toUpperCase() })} /></Field><Field label="Nama" required><TextInput required minLength={2} maxLength={150} value={f.name} onChange={(event) => p.setForm({ ...f, name: event.target.value })} /></Field><Field label="NPWP / Tax ID"><TextInput maxLength={40} value={f.taxId} onChange={(event) => p.setForm({ ...f, taxId: event.target.value })} /></Field><Field label="Nama kontak"><TextInput maxLength={120} value={f.contactName} onChange={(event) => p.setForm({ ...f, contactName: event.target.value })} /></Field><Field label="Telepon"><TextInput type="tel" pattern="\+?[0-9 ()-]{7,30}" value={f.phone} onChange={(event) => p.setForm({ ...f, phone: event.target.value })} /></Field><Field label="Email"><TextInput type="email" value={f.email} onChange={(event) => p.setForm({ ...f, email: event.target.value.toLowerCase() })} /></Field><Field label="Termin pembayaran (hari)"><TextInput type="number" min={0} max={3650} required value={f.paymentTermDays} onChange={(event) => p.setForm({ ...f, paymentTermDays: Number(event.target.value) })} /></Field><Field label="Lead time (hari)"><TextInput type="number" min={0} max={3650} required value={f.leadTimeDays} onChange={(event) => p.setForm({ ...f, leadTimeDays: Number(event.target.value) })} /></Field></div><Field label="Alamat"><TextArea maxLength={2000} value={f.address} onChange={(event) => p.setForm({ ...f, address: event.target.value })} /></Field><FormActions submitting={p.submitting} onCancel={p.onCancel} /></form>; }
+function CatalogEditor(p: { form: CatalogForm; setForm: (value: CatalogForm) => void; lookups: Lookups; editing: boolean; error: string; conflict: boolean; submitting: boolean; onSubmit: (event: FormEvent) => void; onCancel: () => void }) {
+  const f = p.form, ingredient = p.lookups.ingredients.find((row) => row.id === f.ingredientId), compatibleUnits = p.lookups.units.filter((row) => row.dimension === ingredient?.dimension);
+  function chooseIngredient(id: string) { const selected = p.lookups.ingredients.find((row) => row.id === id); p.setForm({ ...f, ingredientId: id, purchaseUnitId: "", conversionToBase: selected ? 1 : f.conversionToBase }); }
+  function chooseUnit(id: string) { p.setForm({ ...f, purchaseUnitId: id, conversionToBase: id && id === ingredient?.baseUnitId ? 1 : f.conversionToBase }); }
+  return <form onSubmit={p.onSubmit} className="space-y-3"><FormError text={p.error} conflict={p.conflict} /><div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><Field label="Bahan" required><SelectInput required value={f.ingredientId} onChange={(event) => chooseIngredient(event.target.value)}><option value="">Pilih bahan</option>{p.lookups.ingredients.map((row) => <option key={row.id} value={row.id}>{row.sku} — {row.name}</option>)}</SelectInput></Field><Field label="Purchase unit" required><SelectInput required value={f.purchaseUnitId} onChange={(event) => chooseUnit(event.target.value)}><option value="">Pilih satuan kompatibel</option>{compatibleUnits.map((row) => <option key={row.id} value={row.id}>{row.code} — {row.name}</option>)}</SelectInput></Field><Field label="SKU Supplier"><TextInput maxLength={80} value={f.supplierSku} onChange={(event) => p.setForm({ ...f, supplierSku: event.target.value })} /></Field><Field label="Harga terakhir" required><TextInput type="number" min={0} step="0.01" required value={f.lastPrice} onChange={(event) => p.setForm({ ...f, lastPrice: event.target.value })} /></Field><Field label="MOQ" required><TextInput type="number" min={0.001} step="0.001" required value={f.minimumOrderQty} onChange={(event) => p.setForm({ ...f, minimumOrderQty: Number(event.target.value) })} /></Field><Field label="Konversi ke base" hint={f.purchaseUnitId === ingredient?.baseUnitId ? "Wajib 1 untuk base unit" : undefined} required><TextInput type="number" min={0.000001} step="0.000001" required disabled={f.purchaseUnitId === ingredient?.baseUnitId} value={f.conversionToBase} onChange={(event) => p.setForm({ ...f, conversionToBase: Number(event.target.value) })} /></Field></div><label className="flex items-center gap-2 text-[13px]"><input type="checkbox" checked={f.isPreferred} onChange={(event) => p.setForm({ ...f, isPreferred: event.target.checked })} className="accent-[oklch(0.52_0.065_128)]" />Jadikan preferred catalog</label><p className="text-[11px] text-mute">{p.editing ? "Hanya katalog aktif yang dapat diubah." : "Kombinasi Supplier, bahan, dan purchase unit harus unik."} Backend menjadi otoritas seluruh aturan katalog.</p><FormActions submitting={p.submitting} onCancel={p.onCancel} /></form>;
+}
+function Actions({ allowed, active, editDisabled, onEdit, onToggle }: { allowed: boolean; active: boolean; editDisabled?: boolean; onEdit: () => void; onToggle: () => void }) { if (!allowed) return <span className="text-mute">—</span>; return <div className="flex gap-1" onClick={(event) => event.stopPropagation()}><Btn variant="ghost" className="px-2 py-1 text-xs" disabled={editDisabled} onClick={onEdit}>Ubah</Btn><Btn variant="ghost" className="px-2 py-1 text-xs" onClick={onToggle}>{active ? "Arsipkan" : "Aktifkan"}</Btn></div>; }
+function FormActions({ submitting, onCancel }: { submitting: boolean; onCancel: () => void }) { return <div className="flex justify-end gap-2 pt-1"><Btn type="button" variant="ghost" disabled={submitting} onClick={onCancel}>Batal</Btn><Btn type="submit" disabled={submitting}>{submitting ? "Menyimpan…" : "Simpan"}</Btn></div>; }
+function FormError({ text, conflict }: { text: string; conflict: boolean }) { return text ? <div className="rounded-lg bg-terra/10 px-3 py-2 text-xs text-terra" role="alert"><strong>{conflict ? "Konflik data: " : ""}</strong>{text}</div> : null; }
+function Kpi({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) { return <Card className="p-3.5"><div className="flex items-center gap-2 text-mute"><span className="[&>svg]:size-3.5">{icon}</span><span className="text-[12px] font-medium">{label}</span></div><p className="mono mt-2 text-xl font-semibold">{value}</p></Card>; }
+function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-lg bg-cream p-3 text-xs ring-1 ring-black/5"><p className="text-mute">{label}</p><p className="mt-1 font-medium">{value}</p></div>; }
+function State({ kind, title, text, action, onAction }: { kind: "loading" | "empty" | "forbidden" | "error"; title: string; text: string; action?: string; onAction?: () => void }) { return <div className="grid min-h-48 place-items-center px-5 py-8 text-center" role={kind === "error" ? "alert" : kind === "loading" ? "status" : undefined}><div>{kind === "loading" && <span className="mx-auto mb-3 block size-7 animate-spin rounded-full border-2 border-olive/20 border-t-olive" />}<strong className="block text-sm">{title}</strong><p className="mt-1 text-xs text-mute">{text}</p>{action && <Btn className="mt-4" onClick={onAction}>{action}</Btn>}</div></div>; }
+function normalizeSupplier(row: Supplier): Supplier { return { ...row, paymentTermDays: Number(row.paymentTermDays), leadTimeDays: Number(row.leadTimeDays), activeCatalogCount: Number(row.activeCatalogCount ?? 0), purchaseOrderCount: Number(row.purchaseOrderCount ?? 0) }; }
+function normalizeCatalog(row: Catalog): Catalog { return { ...row, conversionToBase: Number(row.conversionToBase), lastPrice: row.lastPrice === null ? null : Number(row.lastPrice), unitCostBase: row.unitCostBase === null ? null : Number(row.unitCostBase), minimumOrderQty: Number(row.minimumOrderQty) }; }
+function normalizeOrder(row: PurchaseOrder): PurchaseOrder { return { ...row, grandTotal: Number(row.grandTotal), itemCount: Number(row.itemCount) }; }
+function clean(value: string) { return value.trim() || undefined; }
+function message(cause: unknown, fallback: string) { return cause instanceof Error ? cause.message : fallback; }
+function number(value: number) { return new Intl.NumberFormat("id-ID", { maximumFractionDigits: 6 }).format(value); }
+function money(value: number | null) { return value === null ? "Belum diisi" : new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 2 }).format(value); }
+function date(value: string) { return new Intl.DateTimeFormat("id-ID", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value.slice(0, 10)}T00:00:00`)); }
