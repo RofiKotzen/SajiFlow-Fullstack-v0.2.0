@@ -1,0 +1,119 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Saji Flow design system — "Olive command center"
+ * Warm cream surfaces, olive primary, terracotta for warnings,
+ * Inter for UI, JetBrains Mono for figures & document numbers.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-olive: var(--olive);
+  --color-olive-deep: var(--olive-deep);
+  --color-olive-soft: var(--olive-soft);
+  --color-terra: var(--terra);
+  --color-cream: var(--cream);
+  --color-ink: var(--ink);
+  --color-mute: var(--mute);
+  --color-pine: var(--pine);
+  --color-pine-deep: var(--pine-deep);
+  --color-pine-soft: var(--pine-soft);
+  --color-pine-line: var(--pine-line);
+  --color-pine-mute: var(--pine-mute);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+:root {
+  --radius: 0.625rem;
+  --olive: oklch(0.52 0.065 128);
+  --olive-deep: oklch(0.41 0.055 128);
+  --olive-soft: oklch(0.935 0.022 118);
+  --terra: oklch(0.6 0.115 48);
+  --cream: oklch(0.96 0.01 100);
+  --ink: oklch(0.28 0.02 125);
+  --mute: oklch(0.57 0.025 125);
+  --pine: oklch(0.27 0.04 158);
+  --pine-deep: oklch(0.23 0.035 158);
+  --pine-soft: oklch(0.36 0.05 156);
+  --pine-line: oklch(1 0 0 / 9%);
+  --pine-mute: oklch(0.72 0.03 150);
+
+  --background: var(--cream);
+  --foreground: var(--ink);
+  --card: oklch(0.985 0.005 100);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.985 0.005 100);
+  --popover-foreground: var(--ink);
+  --primary: var(--olive);
+  --primary-foreground: oklch(0.985 0.005 100);
+  --secondary: var(--olive-soft);
+  --secondary-foreground: var(--olive-deep);
+  --muted: var(--olive-soft);
+  --muted-foreground: var(--mute);
+  --accent: var(--olive-soft);
+  --accent-foreground: var(--olive-deep);
+  --destructive: var(--terra);
+  --destructive-foreground: oklch(0.985 0.005 100);
+  --border: oklch(0.28 0.02 125 / 8%);
+  --input: oklch(0.28 0.02 125 / 12%);
+  --ring: oklch(0.52 0.065 128 / 40%);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@utility chrome {
+  background-image: linear-gradient(150deg, oklch(1 0 0) 0%, oklch(0.945 0.015 115) 42%, oklch(0.88 0.02 118) 100%);
+}
+
+@utility metal {
+  background-image: linear-gradient(100deg, oklch(0.84 0.02 118) 0%, oklch(0.965 0.012 115) 45%, oklch(0.81 0.02 118) 100%);
+}
+
+@utility mono {
+  font-family: var(--font-mono);
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.28 0.02 125 / 20%) transparent;
+}
