@@ -1,16 +1,16 @@
 import {
   Bell, ChevronDown, ChevronsLeft, ChevronsRight, ClipboardList, ChefHat, LayoutDashboard,
-  Package, ReceiptText, Search, Settings, ShoppingCart, Soup, Wallet, Menu as MenuIcon, X, Boxes, BookOpen, UtensilsCrossed,
+  Package, ReceiptText, Search, Settings, ShoppingCart, Soup, Wallet, Menu as MenuIcon, X, Boxes, BookOpen, UtensilsCrossed, LogOut,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { OUTLETS, ROLE_PRESETS, type Permission } from "@/lib/mock-data";
+import type { OutletSummary, SessionUser, TenantSummary } from "@/lib/api/types";
 
 export type ViewId =
   | "dashboard" | "pos" | "kds" | "inventory" | "budgets" | "orders" | "receipts"
   | "masters" | "suppliers" | "menu-products" | "recipes" | "settings";
 
-interface NavItem { id: ViewId; label: string; icon: ReactNode; perm?: Permission[] }
+interface NavItem { id: ViewId; label: string; icon: ReactNode; perm?: string[] }
 interface NavGroup { label: string; items: NavItem[] }
 
 const NAV: NavGroup[] = [
@@ -46,31 +46,26 @@ const NAV: NavGroup[] = [
   },
 ];
 
-const OUTLET_KEY = "sajiflow.activeOutlet";
-
 export function AppShell({
-  view, onViewChange, children,
+  view, onViewChange, children, user, tenant, outlets, activeOutletId, contextLoading, onOutletChange, onLogout,
 }: {
   view: ViewId;
   onViewChange: (v: ViewId) => void;
   children: ReactNode;
+  user: SessionUser;
+  tenant: TenantSummary | null;
+  outlets: OutletSummary[];
+  activeOutletId: string;
+  contextLoading: boolean;
+  onOutletChange: (outletId: string) => void;
+  onLogout: () => Promise<void>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const [outlet, setOutlet] = useState(() => (typeof window !== "undefined" && localStorage.getItem(OUTLET_KEY)) || "KMG");
-  const [roleCode, setRoleCode] = useState("ADMIN");
-
-  useEffect(() => {
-    localStorage.setItem(OUTLET_KEY, outlet);
-  }, [outlet]);
-
-  const role = ROLE_PRESETS.find((r) => r.code === roleCode) ?? ROLE_PRESETS[0]!;
-  const allowed = (perm?: Permission[]) => !perm || perm.some((p) => role.permissions.includes(p));
-
   const nav = useMemo(
-    () => NAV.map((g) => ({ ...g, items: g.items.filter((i) => allowed(i.perm)) })).filter((g) => g.items.length > 0),
-    [role]
+    () => NAV.map((g) => ({ ...g, items: g.items.filter((i) => !i.perm || i.perm.some((permission) => user.permissions.includes(permission))) })).filter((g) => g.items.length > 0),
+    [user.permissions]
   );
 
   // fallback jika view aktif tersembunyi oleh permission
@@ -78,7 +73,9 @@ export function AppShell({
     if (!nav.some((g) => g.items.some((i) => i.id === view))) onViewChange("dashboard");
   }, [nav, view, onViewChange]);
 
-  const activeOutlet = OUTLETS.find((o) => o.code === outlet);
+  const activeOutlet = outlets.find((outlet) => outlet.id === activeOutletId);
+  const roleLabel = user.roles.length ? user.roles.join(", ") : "Tanpa role aktif";
+  const initials = user.fullName.split(" ").filter(Boolean).map((word) => word[0]).slice(0, 2).join("").toUpperCase();
 
   const sidebar = (
     <div className="flex h-full flex-col bg-pine text-[oklch(0.93_0.015_140)]">
@@ -133,17 +130,7 @@ export function AppShell({
           );
         })}
       </nav>
-      {!collapsed && (
-        <div className="border-t border-pine-line p-3">
-          <div className="rounded-xl bg-pine-deep p-3 ring-1 ring-white/10">
-            <p className="text-[11px] font-medium text-pine-mute">Anggaran pembelian</p>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
-              <div className="h-full w-[68%] rounded-full bg-[oklch(0.75_0.12_130)]" />
-            </div>
-            <p className="mono mt-1.5 text-[11px] text-pine-mute">68% terpakai</p>
-          </div>
-        </div>
-      )}
+      {!collapsed && <div className="border-t border-pine-line p-3"><div className="rounded-xl bg-pine-deep p-3 ring-1 ring-white/10"><p className="text-[11px] font-medium text-pine-mute">Tenant aktif</p><p className="mt-1 truncate text-[12px] font-semibold text-cream">{tenant?.name ?? user.tenantId}</p></div></div>}
     </div>
   );
 
@@ -180,43 +167,35 @@ export function AppShell({
             {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
           </button>
           <select
-            value={outlet}
-            onChange={(e) => setOutlet(e.target.value)}
+            value={activeOutletId}
+            onChange={(e) => onOutletChange(e.target.value)}
+            disabled={contextLoading || outlets.length < 2}
+            aria-label="Outlet aktif"
             className="chrome h-9 rounded-lg pl-3 pr-2 text-[12px] font-medium text-ink/80 ring-1 ring-black/10 focus:outline-none"
           >
-            {OUTLETS.filter((o) => o.active).map((o) => (
-              <option key={o.code} value={o.code}>{o.name}</option>
-            ))}
+            {!outlets.length && <option value="">Tidak ada outlet tersedia</option>}
+            {outlets.map((outlet) => <option key={outlet.id} value={outlet.id}>{outlet.name}</option>)}
           </select>
           <div className="ml-auto flex items-center gap-3">
             <div className="relative hidden md:block">
               <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-mute/70" />
-              <input
+              <input disabled
                 className="h-9 w-56 rounded-lg bg-cream pl-9 pr-3 text-[13px] ring-1 ring-black/10 placeholder:text-mute/70 focus:outline-none focus:ring-2 focus:ring-olive/40"
-                placeholder="Cari PO, supplier, item…"
+                placeholder="Pencarian belum terintegrasi"
               />
             </div>
-            <button className="relative rounded-lg p-2 text-mute hover:bg-black/5" title="Notifikasi">
+            <button className="relative rounded-lg p-2 text-mute opacity-60" title="Notifikasi belum terintegrasi" disabled>
               <Bell className="size-4" />
-              <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-terra" />
             </button>
             <div className="flex items-center gap-2.5 border-l border-black/5 pl-3">
               <div className="chrome grid size-9 place-items-center rounded-full text-[12px] font-semibold text-olive-deep ring-1 ring-black/10">
-                {role.name.split(" ").map((w) => w[0]).slice(0, 2).join("")}
+                {initials || "?"}
               </div>
               <div className="hidden leading-tight sm:block">
-                <select
-                  value={roleCode}
-                  onChange={(e) => setRoleCode(e.target.value)}
-                  className="h-6 rounded bg-transparent text-[13px] font-medium focus:outline-none"
-                  title="Ganti role (simulasi RBAC)"
-                >
-                  {ROLE_PRESETS.map((r) => (
-                    <option key={r.code} value={r.code}>{r.name}</option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-mute">{activeOutlet?.name ?? "Semua outlet"}</p>
+                <p className="max-w-40 truncate text-[13px] font-medium" title={user.fullName}>{user.fullName}</p>
+                <p className="max-w-40 truncate text-[11px] text-mute" title={`${roleLabel} · ${activeOutlet?.name ?? "Tanpa outlet"}`}>{roleLabel} · {activeOutlet?.name ?? "Tanpa outlet"}</p>
               </div>
+              <button className="rounded-lg p-2 text-mute hover:bg-black/5" title="Keluar" onClick={() => void onLogout()}><LogOut className="size-4" /></button>
             </div>
           </div>
         </header>

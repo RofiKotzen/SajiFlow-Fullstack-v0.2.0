@@ -14,6 +14,8 @@ import { SuppliersView } from "@/views/suppliers";
 import { MenuProductsView } from "@/views/menu-products";
 import { RecipesView } from "@/views/recipes";
 import { SettingsView } from "@/views/settings";
+import { useAuth } from "@/contexts/auth-context";
+import { LoginScreen } from "@/components/login-screen";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,12 +31,31 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  const auth = useAuth();
   const [view, setView] = useState<ViewId>("dashboard");
   const goTo = (v: string) => setView(v as ViewId);
 
+  if (auth.status === "bootstrapping") {
+    return <main className="grid min-h-screen place-items-center bg-cream text-center"><div><div className="mx-auto size-8 animate-spin rounded-full border-2 border-olive/20 border-t-olive"/><p className="mt-3 text-sm text-mute">Menyiapkan sesi Saji Flow…</p></div></main>;
+  }
+
+  if (auth.status === "unauthenticated" || !auth.session) {
+    return <LoginScreen onLogin={auth.login} bootstrapError={auth.bootstrapError} />;
+  }
+
   return (
     <>
-      <AppShell view={view} onViewChange={setView}>
+      <AppShell
+        view={view}
+        onViewChange={setView}
+        user={auth.session.user}
+        tenant={auth.tenant}
+        outlets={auth.outlets}
+        activeOutletId={auth.activeOutletId}
+        contextLoading={auth.contextLoading}
+        onOutletChange={auth.setActiveOutletId}
+        onLogout={auth.logout}
+      >
         {view === "dashboard" && <DashboardView goTo={goTo} />}
         {view === "pos" && <PosView />}
         {view === "kds" && <KdsView />}
