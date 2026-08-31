@@ -1,161 +1,41 @@
-import { Plus } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, Plus, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Btn, Card, DataTable, Row, Cell, Field, TextInput, SelectInput, TextArea, StatusBadge, Progress, Modal } from "@/components/ui";
-import { BUDGETS, OUTLETS, idr, type Budget, type BudgetLine } from "@/lib/mock-data";
+import { Badge, Btn, Card, CardHeader, Cell, DataTable, Drawer, Field, Modal, Progress, Row, SelectInput, StatusBadge, TextArea, TextInput } from "@/components/ui";
+import { useAuth } from "@/contexts/auth-context";
+import { ApiError } from "@/lib/api/types";
 
-const CATEGORIES: BudgetLine["category"][] = ["purchase", "operational", "maintenance", "marketing", "other"];
+type Status="draft"|"submitted"|"approved"|"rejected"|"closed";type Category="purchase"|"operational"|"maintenance"|"marketing"|"other";
+type Summary={id:string;outletId:string;outletName:string;budgetCode:string;name:string;periodStart:string;periodEnd:string;status:Status;totalAmount:string|number;submittedAt:string|null;approvedAt:string|null;notes:string|null;updatedAt:string};
+type Line={id:string;category:Category;description:string;plannedAmount:string|number;actualAmount:string|number;varianceAmount:string|number;warningThresholdPct:string|number};
+type History={id:string;fromStatus:Status|null;toStatus:Status;changedByName:string|null;reason:string|null;changedAt:string};
+type Detail=Summary&{lines:Line[];history:History[]};type Outlet={id:string;code:string;name:string;isActive:boolean};
+type FormLine={key:string;category:Category;description:string;plannedAmount:string;warningThresholdPct:string};type BudgetForm={outletId:string;budgetCode:string;name:string;periodStart:string;periodEnd:string;notes:string;lines:FormLine[]};
+type Confirmation={action:"submit"|"approve"|"reject"|"close";reason:string}|null;
+const categories:Category[]=["purchase","operational","maintenance","marketing","other"];
+const blankLine=():FormLine=>({key:crypto.randomUUID(),category:"purchase",description:"",plannedAmount:"0",warningThresholdPct:"80"});
+const blankForm=(outletId=""):BudgetForm=>({outletId,budgetCode:"",name:"",periodStart:"",periodEnd:"",notes:"",lines:[blankLine()]});
 
-export function BudgetsView() {
-  const [budgets, setBudgets] = useState<Budget[]>(BUDGETS);
-  const [selId, setSelId] = useState(BUDGETS[0]!.id);
-  const [creating, setCreating] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [name, setName] = useState("");
-  const [outlet, setOutlet] = useState("KMG");
-  const [period, setPeriod] = useState("2026-09");
-  const [note, setNote] = useState("");
-  const [lines, setLines] = useState<BudgetLine[]>([{ category: "purchase", desc: "", planned: 0, realized: 0, threshold: 80 }]);
+export function BudgetsView(){const{api,session,activeOutletId}=useAuth();const can=useCallback((p:string)=>(session?.user.permissions??[]).includes(p),[session]);const read=can("budgets.read");
+const[rows,setRows]=useState<Summary[]>([]),[outlets,setOutlets]=useState<Outlet[]>([]),[outletId,setOutletId]=useState(activeOutletId),[status,setStatus]=useState(""),[query,setQuery]=useState("");
+const[loading,setLoading]=useState(true),[error,setError]=useState(""),[detailId,setDetailId]=useState(""),[detail,setDetail]=useState<Detail|null>(null),[detailLoading,setDetailLoading]=useState(false),[detailError,setDetailError]=useState("");
+const[form,setForm]=useState<BudgetForm|null>(null),[editing,setEditing]=useState(false),[saving,setSaving]=useState(false),[formError,setFormError]=useState(""),[conflict,setConflict]=useState(false),[confirm,setConfirm]=useState<Confirmation>(null),[actionError,setActionError]=useState("");
+useEffect(()=>{if(activeOutletId)setOutletId(activeOutletId)},[activeOutletId]);
+const load=useCallback(async()=>{if(!read)return;setLoading(true);try{const p=new URLSearchParams();if(outletId)p.set("outletId",outletId);if(status)p.set("status",status);const[b,o]=await Promise.all([api<Summary[]>(`/budgets?${p}`),api<Outlet[]>("/outlets")]);setRows(b);setOutlets(o.filter(x=>x.isActive&&(session?.user.outletIds.length?session.user.outletIds.includes(x.id):true)));setError("")}catch(e){setError(message(e))}finally{setLoading(false)}},[api,outletId,read,session,status]);
+const open=useCallback(async(id:string)=>{setDetailId(id);setDetailLoading(true);setDetailError("");try{setDetail(await api<Detail>(`/budgets/${id}`))}catch(e){setDetailError(message(e))}finally{setDetailLoading(false)}},[api]);useEffect(()=>{void load()},[load]);
+const visible=useMemo(()=>rows.filter(x=>`${x.budgetCode} ${x.name} ${x.outletName}`.toLowerCase().includes(query.toLowerCase())),[query,rows]);const totals=useMemo(()=>({all:rows.reduce((s,x)=>s+Number(x.totalAmount),0),approved:rows.filter(x=>x.status==="approved").reduce((s,x)=>s+Number(x.totalAmount),0)}),[rows]);
+function create(){setEditing(false);setFormError("");setForm(blankForm(outletId||outlets[0]?.id))}function edit(){if(!detail||!["draft","rejected"].includes(detail.status))return;setEditing(true);setForm({outletId:detail.outletId,budgetCode:detail.budgetCode,name:detail.name,periodStart:detail.periodStart,periodEnd:detail.periodEnd,notes:detail.notes??"",lines:detail.lines.map(x=>({key:x.id,category:x.category,description:x.description,plannedAmount:String(x.plannedAmount),warningThresholdPct:String(x.warningThresholdPct)}))})}
+async function save(e:FormEvent){e.preventDefault();if(!form)return;setSaving(true);setFormError("");setConflict(false);try{const payload={outletId:form.outletId,budgetCode:form.budgetCode||undefined,name:form.name,periodStart:form.periodStart,periodEnd:form.periodEnd,notes:form.notes||undefined,lines:form.lines.map(({category,description,plannedAmount,warningThresholdPct})=>({category,description,plannedAmount:Number(plannedAmount),warningThresholdPct:Number(warningThresholdPct)}))};const saved=await api<Detail>(editing?`/budgets/${detail?.id}`:"/budgets",{method:editing?"PATCH":"POST",body:JSON.stringify(payload)});toast.success(editing?"Budget diperbarui.":"Draft Budget dibuat.");setForm(null);await load();await open(saved.id)}catch(x){setConflict(x instanceof ApiError&&x.status===409);setFormError(message(x))}finally{setSaving(false)}}
+async function act(){if(!detail||!confirm)return;setSaving(true);setActionError("");try{const updated=await api<Detail>(`/budgets/${detail.id}/${confirm.action}`,{method:"POST",body:JSON.stringify({reason:confirm.reason||undefined})});toast.success("Status Budget diperbarui oleh backend.");setConfirm(null);setDetail(updated);await load()}catch(e){setActionError(message(e));setConfirm(null)}finally{setSaving(false)}}
+if(!read)return <State kind="forbidden" title="Akses Budget diperlukan" text="Permission budgets.read diperlukan. API Budget tidak dipanggil."/>;
+return <div className="space-y-4"><div className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">Budget Planning</h1><p className="mt-1 text-[13px] text-mute">Rencana anggaran per outlet dan periode</p></div>{can("budgets.create")&&<Btn onClick={create}><Plus className="size-3.5"/>Buat Anggaran</Btn>}</div>
+<div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><Kpi label="Jumlah Budget" value={String(rows.length)}/><Kpi label="Total rencana" value={money(totals.all)}/><Kpi label="Approved" value={money(totals.approved)}/><Kpi label="Perlu tindakan" value={String(rows.filter(x=>["draft","submitted","rejected"].includes(x.status)).length)} warn/></div>
+{error&&<Alert text={error} retry={()=>void load()}/>}<Card className="overflow-hidden"><CardHeader title="Daftar Budget" sub={`${visible.length} dari ${rows.length} budget`} action={<div className="flex flex-wrap gap-2"><div className="relative"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute"/><TextInput className="w-48 pl-8" placeholder="Cari Budget…" value={query} onChange={e=>setQuery(e.target.value)}/></div><SelectInput className="w-36" value={status} onChange={e=>setStatus(e.target.value)} aria-label="Status"><option value="">Semua status</option>{["draft","submitted","approved","rejected","closed"].map(x=><option key={x}>{x}</option>)}</SelectInput><SelectInput className="w-44" value={outletId} onChange={e=>setOutletId(e.target.value)} aria-label="Outlet"><option value="">Semua outlet</option>{outlets.map(x=><option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</SelectInput></div>}/>{loading?<State kind="loading" title="Memuat Budget" text="Mengambil data backend…"/>:visible.length===0?<State kind="empty" title={query?"Hasil filter kosong":"Belum ada Budget"} text="Ubah filter atau buat draft baru."/>:<DataTable head={["Kode / Budget","Periode","Outlet","Total","Status","Diperbarui"]} wide>{visible.map(x=><Row key={x.id} onClick={()=>void open(x.id)}><Cell><strong>{x.name}</strong><p className="mono text-xs text-mute">{x.budgetCode}</p></Cell><Cell>{period(x.periodStart,x.periodEnd)}</Cell><Cell>{x.outletName}</Cell><Cell className="mono text-right">{money(x.totalAmount)}</Cell><Cell><StatusBadge label={x.status}/></Cell><Cell className="text-mute">{date(x.updatedAt)}</Cell></Row>)}</DataTable>}</Card>
+<Drawer open={Boolean(detailId)} onClose={()=>{setDetailId("");setDetail(null)}} title={detail?.name??"Detail Budget"} sub={detail?`${detail.budgetCode} · ${detail.outletName}`:undefined}>{detailLoading?<State kind="loading" title="Memuat detail" text="Mengambil alokasi dan histori…"/>:detailError?<State kind="error" title="Detail gagal" text={detailError} action="Coba lagi" onAction={()=>void open(detailId)}/>:detail&&<div className="space-y-5">{actionError&&<Alert text={actionError} retry={()=>void open(detail.id)}/>}<div className="flex justify-between"><StatusBadge label={detail.status}/><span className="text-xs text-mute">{period(detail.periodStart,detail.periodEnd)}</span></div><div className="grid grid-cols-2 gap-3"><Metric label="Total Budget" value={money(detail.totalAmount)}/><Metric label="Jumlah alokasi" value={String(detail.lines.length)}/></div><Lines lines={detail.lines}/><section><h4 className="mb-2 text-xs font-semibold uppercase text-mute">Riwayat Status</h4>{detail.history.map(h=><div key={h.id} className="mb-2 rounded-lg border border-black/5 p-3 text-xs"><div className="flex justify-between"><strong>{h.fromStatus?`${h.fromStatus} → ${h.toStatus}`:h.toStatus}</strong><span>{date(h.changedAt)}</span></div><p className="text-mute">{h.changedByName??"User"}{h.reason?` · ${h.reason}`:""}</p></div>)}</section><div className="flex flex-wrap gap-2 border-t pt-4">{["draft","rejected"].includes(detail.status)&&can("budgets.update")&&<Btn variant="outline" onClick={edit}>Ubah</Btn>}{["draft","rejected"].includes(detail.status)&&can("budgets.submit")&&<Btn onClick={()=>setConfirm({action:"submit",reason:""})}>Ajukan</Btn>}{detail.status==="submitted"&&can("budgets.approve")&&<Btn onClick={()=>setConfirm({action:"approve",reason:""})}>Setujui</Btn>}{detail.status==="submitted"&&can("budgets.reject")&&<Btn variant="danger" onClick={()=>setConfirm({action:"reject",reason:""})}>Tolak</Btn>}{detail.status==="approved"&&can("budgets.close")&&<Btn variant="outline" onClick={()=>setConfirm({action:"close",reason:""})}>Tutup</Btn>}</div></div>}</Drawer>
+<Modal open={Boolean(form)} onClose={()=>!saving&&setForm(null)} title={editing?"Ubah Budget":"Buat Budget"} wide>{form&&<Editor form={form} setForm={setForm} outlets={outlets} editing={editing} saving={saving} error={formError} conflict={conflict} reload={()=>{setForm(null);if(detailId)void open(detailId)}} submit={save}/>}</Modal>
+<Modal open={Boolean(confirm)} onClose={()=>!saving&&setConfirm(null)} title="Konfirmasi perubahan status">{confirm&&<div className="space-y-4"><p className="text-sm">Aksi <strong>{confirm.action}</strong> akan dijalankan oleh backend.</p><Field label={confirm.action==="reject"?"Alasan penolakan":"Catatan tindakan"} required={confirm.action==="reject"}><TextArea autoFocus value={confirm.reason} onChange={e=>setConfirm({...confirm,reason:e.target.value})}/></Field><div className="flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setConfirm(null)}>Batal</Btn><Btn disabled={saving||(confirm.action==="reject"&&confirm.reason.trim().length<3)} onClick={()=>void act()}>{saving?"Memproses…":"Konfirmasi"}</Btn></div></div>}</Modal></div>}
 
-  const sel = budgets.find((b) => b.id === selId);
-  const editable = sel ? sel.status === "draft" || sel.status === "rejected" : false;
-
-  const patch = (id: string, status: Budget["status"], action: string, msg: string) => {
-    setBudgets((p) => p.map((b) => (b.id === id ? { ...b, status, history: [...b.history, { at: "2026-08-29 13:20", by: "Raka Aditya", action }] } : b)));
-    toast.success(msg);
-  };
-
-  const createBudget = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (lines.some((l) => l.planned < 0)) { toast.error("Rencana tidak boleh negatif"); return; }
-    setSaving(true);
-    setTimeout(() => {
-      const id = `BDG-${period}-${outlet}`;
-      setBudgets((p) => [{ id, name, outlet, period, status: "draft", note: note || undefined, lines, history: [{ at: "2026-08-29 13:20", by: "Raka Aditya", action: "Dibuat" }] }, ...p]);
-      setSelId(id); setCreating(false); setSaving(false);
-      toast.success("Draft anggaran disimpan");
-    }, 400);
-  };
-
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Budget Planning</h1>
-          <p className="mt-1 text-[13px] text-mute">Rencana anggaran per outlet dan periode</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <SelectInput value={selId} onChange={(e) => setSelId(e.target.value)} className="w-64">
-            {budgets.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </SelectInput>
-          <Btn onClick={() => { setCreating(true); setName(""); setLines([{ category: "purchase", desc: "", planned: 0, realized: 0, threshold: 80 }]); }}>
-            <Plus className="size-3.5" /> Buat Anggaran
-          </Btn>
-        </div>
-      </div>
-
-      {sel && (
-        <div className="space-y-4">
-          <Card className="p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-[15px] font-semibold tracking-tight">{sel.name}</h2>
-                  <StatusBadge label={sel.status} />
-                </div>
-                <p className="mt-1 text-[12px] text-mute">
-                  Periode {sel.period} · outlet {sel.outlet}{sel.note && ` · ${sel.note}`}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                {sel.status === "draft" && <Btn onClick={() => patch(sel.id, "submitted", "Diajukan", "Anggaran diajukan untuk approval")}>Ajukan (Submit)</Btn>}
-                {sel.status === "submitted" && (
-                  <>
-                    <Btn onClick={() => patch(sel.id, "approved", "Disetujui", "Anggaran disetujui")}>Approve</Btn>
-                    <Btn variant="danger" onClick={() => patch(sel.id, "rejected", "Ditolak", "Anggaran ditolak")}>Reject</Btn>
-                  </>
-                )}
-                {sel.status === "approved" && <Btn variant="outline" onClick={() => patch(sel.id, "closed", "Ditutup", "Anggaran ditutup")}>Tutup Anggaran</Btn>}
-              </div>
-            </div>
-          </Card>
-
-          <Card className="overflow-hidden">
-            <DataTable head={["Kategori", "Deskripsi", "Rencana", "Realisasi", "Sisa", "Pemakaian", "Ambang"]} wide>
-              {sel.lines.map((l, i) => {
-                const pct = l.planned > 0 ? Math.round((l.realized / l.planned) * 100) : 0;
-                const warn = pct > l.threshold;
-                return (
-                  <Row key={i}>
-                    <Cell className="capitalize">{l.category}</Cell>
-                    <Cell className="text-mute">{l.desc}</Cell>
-                    <Cell className="mono text-right">{idr(l.planned)}</Cell>
-                    <Cell className="mono text-right">{idr(l.realized)}</Cell>
-                    <Cell className={`mono text-right ${l.planned - l.realized < 0 ? "text-terra" : ""}`}>{idr(l.planned - l.realized)}</Cell>
-                    <Cell className="w-40">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1"><Progress value={pct} warn={warn} /></div>
-                        <span className={`mono w-10 text-right text-[11px] ${warn ? "font-semibold text-terra" : "text-mute"}`}>{pct}%</span>
-                      </div>
-                    </Cell>
-                    <Cell className="mono text-right text-mute">{l.threshold}%</Cell>
-                  </Row>
-                );
-              })}
-            </DataTable>
-          </Card>
-
-          <Card className="p-4">
-            <h2 className="text-[14px] font-semibold tracking-tight">Riwayat Revisi & Status</h2>
-            <ol className="mt-3 space-y-2 border-l border-black/10 pl-3">
-              {sel.history.map((h, i) => (
-                <li key={i} className="text-[12.5px]"><p className="font-medium">{h.action}</p><p className="text-mute">{h.at} · {h.by}</p></li>
-              ))}
-            </ol>
-          </Card>
-        </div>
-      )}
-
-      <Modal open={creating} onClose={() => setCreating(false)} title="Buat Anggaran" wide>
-        <form onSubmit={createBudget} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Nama rencana" required><TextInput value={name} onChange={(e) => setName(e.target.value)} required maxLength={150} placeholder="Anggaran September — Kemang" /></Field>
-            <Field label="Periode" required hint="Dikonversi ke tanggal awal & akhir bulan"><TextInput type="month" value={period} onChange={(e) => setPeriod(e.target.value)} required /></Field>
-            <Field label="Outlet" required>
-              <SelectInput value={outlet} onChange={(e) => setOutlet(e.target.value)} required>
-                {OUTLETS.filter((o) => o.active).map((o) => <option key={o.code} value={o.code}>{o.name}</option>)}
-              </SelectInput>
-            </Field>
-          </div>
-          <Field label="Catatan"><TextArea value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} /></Field>
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[12px] font-medium text-ink/80">Alokasi per kategori <span className="text-terra">*</span></p>
-              <Btn type="button" variant="outline" className="px-2 py-1 text-[12px]" onClick={() => setLines((p) => [...p, { category: "operational", desc: "", planned: 0, realized: 0, threshold: 80 }])}>
-                <Plus className="size-3" /> Tambah baris
-              </Btn>
-            </div>
-            <div className="space-y-2">
-              {lines.map((l, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <SelectInput className="w-32" value={l.category} onChange={(e) => setLines((p) => p.map((x, xi) => (xi === i ? { ...x, category: e.target.value as BudgetLine["category"] } : x)))}>
-                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </SelectInput>
-                  <TextInput className="flex-1" placeholder="Deskripsi" maxLength={200} value={l.desc} onChange={(e) => setLines((p) => p.map((x, xi) => (xi === i ? { ...x, desc: e.target.value } : x)))} />
-                  <TextInput type="number" min={0} step={1000} className="w-32" placeholder="Rencana" value={l.planned || ""} onChange={(e) => setLines((p) => p.map((x, xi) => (xi === i ? { ...x, planned: Number(e.target.value) } : x)))} />
-                  <TextInput type="number" min={0} max={100} className="w-20" placeholder="Ambang" value={l.threshold} onChange={(e) => setLines((p) => p.map((x, xi) => (xi === i ? { ...x, threshold: Math.min(100, Math.max(0, Number(e.target.value))) } : x)))} />
-                  <Btn type="button" variant="ghost" className="px-2" disabled={lines.length === 1} title="Minimal satu baris alokasi" onClick={() => setLines((p) => p.filter((_, xi) => xi !== i))}>✕</Btn>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-black/5 pt-3">
-            <Btn type="button" variant="ghost" onClick={() => setCreating(false)}>Batal</Btn>
-            <Btn type="submit" disabled={saving}>{saving ? "Menyimpan…" : "Simpan Draft"}</Btn>
-          </div>
-        </form>
-      </Modal>
-      {!editable && null}
-    </div>
-  );
-}
+function Editor(p:{form:BudgetForm;setForm:(x:BudgetForm)=>void;outlets:Outlet[];editing:boolean;saving:boolean;error:string;conflict:boolean;reload:()=>void;submit:(e:FormEvent)=>void}){const f=p.form;const line=(key:string,x:Partial<FormLine>)=>p.setForm({...f,lines:f.lines.map(v=>v.key===key?{...v,...x}:v)});return <form className="space-y-4" onSubmit={p.submit}>{p.error&&<div role="alert" className="rounded-lg bg-terra/10 p-3 text-xs text-terra">{p.error}{p.conflict&&<button type="button" className="ml-2 underline" onClick={p.reload}>Muat ulang</button>}</div>}<div className="grid gap-3 sm:grid-cols-2"><Field label="Kode" hint="Kosongkan untuk kode otomatis backend"><TextInput disabled={p.editing} pattern="[A-Z0-9_-]+" value={f.budgetCode} onChange={e=>p.setForm({...f,budgetCode:e.target.value.toUpperCase()})}/></Field><Field label="Nama" required><TextInput required minLength={2} maxLength={150} value={f.name} onChange={e=>p.setForm({...f,name:e.target.value})}/></Field><Field label="Outlet" required><SelectInput required value={f.outletId} onChange={e=>p.setForm({...f,outletId:e.target.value})}><option value="">Pilih outlet</option>{p.outlets.map(x=><option key={x.id} value={x.id}>{x.code} — {x.name}</option>)}</SelectInput></Field><Field label="Mulai" required><TextInput required type="date" value={f.periodStart} onChange={e=>p.setForm({...f,periodStart:e.target.value})}/></Field><Field label="Selesai" required><TextInput required type="date" value={f.periodEnd} onChange={e=>p.setForm({...f,periodEnd:e.target.value})}/></Field></div><Field label="Catatan"><TextArea maxLength={2000} value={f.notes} onChange={e=>p.setForm({...f,notes:e.target.value})}/></Field><div className="flex justify-between"><strong className="text-xs">Alokasi</strong><Btn type="button" variant="outline" className="px-2 py-1" onClick={()=>p.setForm({...f,lines:[...f.lines,blankLine()]})}><Plus className="size-3"/>Tambah</Btn></div>{f.lines.map((v,i)=><div key={v.key} className="grid grid-cols-2 gap-2 rounded-lg bg-cream p-3 sm:grid-cols-[1fr_2fr_1fr_1fr_auto]"><Field label="Kategori" required><SelectInput value={v.category} onChange={e=>line(v.key,{category:e.target.value as Category})}>{categories.map(x=><option key={x}>{x}</option>)}</SelectInput></Field><Field label="Deskripsi" required><TextInput required minLength={2} maxLength={200} value={v.description} onChange={e=>line(v.key,{description:e.target.value})}/></Field><Field label="Rencana" required><TextInput required type="number" min={0} step="0.01" value={v.plannedAmount} onChange={e=>line(v.key,{plannedAmount:e.target.value})}/></Field><Field label="Ambang %"><TextInput type="number" min={0} max={100} step="0.01" value={v.warningThresholdPct} onChange={e=>line(v.key,{warningThresholdPct:e.target.value})}/></Field><div className="flex items-end"><Btn type="button" variant="ghost" disabled={f.lines.length===1} aria-label={`Hapus alokasi ${i+1}`} onClick={()=>p.setForm({...f,lines:f.lines.filter(x=>x.key!==v.key)})}>×</Btn></div></div>)}<p className="text-[11px] text-mute">Total disimpan dan divalidasi backend dari seluruh alokasi.</p><div className="flex justify-end gap-2"><Btn type="button" variant="ghost" onClick={()=>p.setForm(f)}>Batal</Btn><Btn disabled={p.saving}>{p.saving?"Menyimpan…":"Simpan Draft"}</Btn></div></form>}
+function Lines({lines}:{lines:Line[]}){return <section><h4 className="mb-2 text-xs font-semibold uppercase text-mute">Alokasi Backend</h4><div className="overflow-x-auto"><table className="w-full min-w-max text-xs"><thead><tr className="text-left text-mute"><th>Kategori</th><th>Deskripsi</th><th className="text-right">Rencana</th><th className="text-right">Aktual</th><th className="text-right">Variance</th><th>Pemakaian</th></tr></thead><tbody>{lines.map(x=>{const usage=Number(x.plannedAmount)>0?Number(x.actualAmount)/Number(x.plannedAmount)*100:0;return <tr key={x.id} className="border-t"><td className="py-2">{x.category}</td><td>{x.description}</td><td className="text-right mono">{money(x.plannedAmount)}</td><td className="text-right mono">{money(x.actualAmount)}</td><td className="text-right mono">{money(x.varianceAmount)}</td><td className="w-32"><Progress value={usage} warn={usage>=Number(x.warningThresholdPct)}/><span className="text-[11px]">{usage.toFixed(1)}%</span></td></tr>})}</tbody></table></div></section>}
+function Kpi({label,value,warn=false}:{label:string;value:string;warn?:boolean}){return <Card className="p-3.5"><p className="flex gap-2 text-xs text-mute">{warn&&<AlertTriangle className="size-3.5 text-terra"/>}{label}</p><p className="mono mt-2 text-lg font-semibold">{value}</p></Card>}function Metric({label,value}:{label:string;value:string}){return <div><p className="text-xs text-mute">{label}</p><strong className="mono text-sm">{value}</strong></div>}function Alert({text,retry}:{text:string;retry:()=>void}){return <div role="alert" className="flex justify-between rounded-lg bg-terra/10 p-3 text-xs text-terra">{text}<Btn variant="ghost" onClick={retry}><RefreshCw className="size-3"/>Coba lagi</Btn></div>}function State({kind,title,text,action,onAction}:{kind:"loading"|"empty"|"forbidden"|"error";title:string;text:string;action?:string;onAction?:()=>void}){return <div className="grid min-h-48 place-items-center p-8 text-center" role={kind==="error"?"alert":undefined}><div><strong>{title}</strong><p className="text-xs text-mute">{text}</p>{action&&<Btn className="mt-3" onClick={onAction}>{action}</Btn>}</div></div>}
+function money(v:string|number){return new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:2}).format(Number(v)||0)}function period(a:string,b:string){return `${new Date(`${a}T00:00:00`).toLocaleDateString("id-ID")} – ${new Date(`${b}T00:00:00`).toLocaleDateString("id-ID")}`}function date(v:string){return new Date(v).toLocaleString("id-ID")}function message(e:unknown){return e instanceof Error?e.message:"Operasi Budget gagal."}
