@@ -1,149 +1,392 @@
-import { ArrowRight } from "lucide-react";
-import { useState } from "react";
-import { Card, CardHeader, Badge, Btn, DataTable, Row, Cell, Progress, Drawer, StatusBadge } from "@/components/ui";
-import { PURCHASE_ORDERS, SUPPLIERS, poTotals, supplierName, idr, type PurchaseOrder } from "@/lib/mock-data";
-
+import { ArrowRight, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Badge,
+  Btn,
+  Card,
+  CardHeader,
+  Cell,
+  DataTable,
+  Progress,
+  Row,
+  StatusBadge,
+} from "@/components/ui";
+import { useAuth } from "@/contexts/auth-context";
+type Source<T> = { loading: boolean; data: T | null; error: string };
+type PO = {
+  id: string;
+  outletId: string;
+  outletName: string;
+  poNo: string;
+  supplierName: string;
+  orderDate: string;
+  expectedDate: string | null;
+  status: string;
+  grandTotal: number;
+  currencyCode: string;
+  itemCount: number;
+};
+type GR = { id: string; status: string; stockValue: number };
+type Inventory = {
+  summary: {
+    skuCount: number;
+    stockValue: number;
+    attentionCount: number;
+    expiringBatchCount: number;
+    expiredBatchCount: number;
+  };
+  items: {
+    ingredientId: string;
+    sku: string;
+    ingredientName: string;
+    outletName: string;
+    onHand: number;
+    unitCode: string;
+    status: string;
+    nearestExpiry: string | null;
+  }[];
+  generatedAt: string;
+};
+type Supplier = { id: string; name: string; isActive: boolean; activeCatalogCount: number };
+type Budget = { id: string; status: string; totalAmount: number };
+type MenuSummary = { menus: number; active: number; archived: number; variants: number };
+type Recipe = { id: string; status: string | null; costingComplete: boolean | null };
+const source = <T,>(): Source<T> => ({ loading: true, data: null, error: "" });
 export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
-  const [selected, setSelected] = useState<PurchaseOrder | null>(null);
-  const recent = PURCHASE_ORDERS.slice(0, 5);
-
+  const { api, session, activeOutletId } = useAuth(),
+    can = useCallback((p: string) => (session?.user.permissions ?? []).includes(p), [session]);
+  const [po, setPo] = useState<Source<PO[]>>(source),
+    [gr, setGr] = useState<Source<GR[]>>(source),
+    [inventory, setInventory] = useState<Source<Inventory>>(source),
+    [suppliers, setSuppliers] = useState<Source<Supplier[]>>(source),
+    [budgets, setBudgets] = useState<Source<Budget[]>>(source),
+    [menus, setMenus] = useState<Source<MenuSummary>>(source),
+    [recipes, setRecipes] = useState<Source<Recipe[]>>(source),
+    [reload, setReload] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const scope = (path: string) =>
+      `${path}${activeOutletId ? `${path.includes("?") ? "&" : "?"}outletId=${encodeURIComponent(activeOutletId)}` : ""}`;
+    const request = <T,>(allowed: boolean, path: string, set: (x: Source<T>) => void) => {
+      if (!allowed) {
+        set({ loading: false, data: null, error: "forbidden" });
+        return;
+      }
+      set(source<T>());
+      api<T>(path)
+        .then((data) => {
+          if (live) set({ loading: false, data, error: "" });
+        })
+        .catch((e) => {
+          if (live)
+            set({
+              loading: false,
+              data: null,
+              error: e instanceof Error ? e.message : "Sumber tidak tersedia",
+            });
+        });
+    };
+    request(can("purchase_orders.read"), scope("/purchase-orders"), setPo);
+    request(can("goods_receipts.read"), scope("/goods-receipts"), setGr);
+    request(can("inventory.read") && Boolean(activeOutletId), scope("/inventory"), setInventory);
+    request(can("suppliers.read"), "/suppliers", setSuppliers);
+    request(can("budgets.read"), scope("/budgets"), setBudgets);
+    request(can("menus.read"), "/menu-products/summary", setMenus);
+    request(can("recipes.read"), scope("/recipes"), setRecipes);
+    return () => {
+      live = false;
+    };
+  }, [activeOutletId, api, can, reload]);
+  const recent = useMemo(
+    () => [...(po.data ?? [])].sort((a, b) => b.orderDate.localeCompare(a.orderDate)).slice(0, 5),
+    [po.data],
+  );
+  const activePo = (po.data ?? []).filter((x) => !["cancelled", "closed"].includes(x.status));
+  const poValue = activePo.reduce((s, x) => s + Number(x.grandTotal), 0);
+  const pendingGr = (po.data ?? []).filter((x) =>
+    ["sent", "partially_received"].includes(x.status),
+  ).length;
+  const activeSuppliers = (suppliers.data ?? []).filter((x) => x.isActive);
+  const noCatalog = activeSuppliers.filter((x) => Number(x.activeCatalogCount) === 0).length;
+  const attention = (inventory.data?.items ?? []).filter((x) => x.status !== "safe").slice(0, 4);
+  const activeBudgets = (budgets.data ?? []).filter((x) =>
+    ["draft", "submitted", "approved", "rejected"].includes(x.status),
+  );
+  const limited = [po, gr, inventory, suppliers, budgets, menus, recipes].every(
+    (x) => x.error === "forbidden",
+  );
+  const currency = po.data?.[0]?.currencyCode ?? "IDR";
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-balance">Dasbor Pembelian</h1>
-          <p className="mt-1 text-[13px] text-mute">Ringkasan operasional outlet aktif · 29 Agustus 2026</p>
+          <p className="mt-1 text-[13px] text-mute">
+            Ringkasan backend ·{" "}
+            {activeOutletId ? "outlet aktif" : "semua outlet yang dapat diakses"}
+          </p>
         </div>
-        <Btn onClick={() => goTo("orders")}>Buat PO Baru</Btn>
+        <div className="flex gap-2">
+          <Btn variant="outline" onClick={() => setReload((x) => x + 1)}>
+            <RefreshCw className="size-3.5" />
+            Muat ulang
+          </Btn>
+          {can("purchase_orders.create") && <Btn onClick={() => goTo("orders")}>Buat PO Baru</Btn>}
+        </div>
       </div>
-
+      {limited && (
+        <Card className="mb-4 p-5 text-center">
+          <strong>Akses Dashboard terbatas</strong>
+          <p className="text-xs text-mute">
+            Tidak ada permission read untuk sumber operasional Dashboard.
+          </p>
+        </Card>
+      )}
       <div className="mb-5 grid grid-cols-2 gap-4 xl:grid-cols-4">
-        {[
-          { label: "Nilai Pembelian Bulan Ini", value: "Rp 48,2 jt", sub: "▲ 12,4% vs Juli", tone: "text-olive" },
-          { label: "PO Aktif", value: "18", sub: "6 menunggu kirim", tone: "text-terra" },
-          { label: "Penerimaan Tertunda", value: "7", sub: "2 terlambat > 24 jam", tone: "text-mute" },
-          { label: "Supplier Aktif", value: "24", sub: "3 baru bulan ini", tone: "text-olive" },
-        ].map((k) => (
-          <Card key={k.label} className="p-4">
-            <p className="text-[12px] font-medium text-mute">{k.label}</p>
-            <p className="mono mt-2 text-[26px] font-semibold tracking-tight">{k.value}</p>
-            <p className={`mt-1 text-[11px] font-medium ${k.tone}`}>{k.sub}</p>
-          </Card>
-        ))}
+        <Kpi
+          label="Nilai PO Aktif"
+          value={po.loading ? "…" : po.data ? money(poValue, currency) : "Belum tersedia"}
+          sub={po.data ? `${activePo.length} PO di luar closed/cancelled` : labelError(po)}
+          tone="text-olive"
+        />
+        <Kpi
+          label="PO Menunggu Penerimaan"
+          value={po.loading ? "…" : po.data ? String(pendingGr) : "—"}
+          sub="Status sent / partially received"
+          tone="text-terra"
+        />
+        <Kpi
+          label="Nilai Inventory"
+          value={
+            inventory.loading
+              ? "…"
+              : inventory.data
+                ? money(inventory.data.summary.stockValue, currency)
+                : "Belum tersedia"
+          }
+          sub={
+            inventory.data
+              ? `${inventory.data.summary.attentionCount} item perlu perhatian`
+              : activeOutletId
+                ? labelError(inventory)
+                : "Pilih outlet aktif"
+          }
+          tone="text-mute"
+        />
+        <Kpi
+          label="Supplier Aktif"
+          value={suppliers.loading ? "…" : suppliers.data ? String(activeSuppliers.length) : "—"}
+          sub={suppliers.data ? `${noCatalog} tanpa katalog aktif` : labelError(suppliers)}
+          tone="text-olive"
+        />
       </div>
-
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.9fr_1fr]">
         <Card className="overflow-hidden">
           <CardHeader
             title="Purchase Order Terbaru"
-            sub={`${PURCHASE_ORDERS.length} dokumen · 14 hari terakhir`}
-            action={<button onClick={() => goTo("orders")} className="flex items-center gap-1 text-[12px] font-medium text-olive hover:text-olive-deep">Lihat semua <ArrowRight className="size-3" /></button>}
+            sub={po.data ? `${po.data.length} dokumen dalam scope backend` : labelError(po)}
+            action={
+              can("purchase_orders.read") ? (
+                <button
+                  onClick={() => goTo("orders")}
+                  className="flex items-center gap-1 text-[12px] font-medium text-olive"
+                >
+                  Lihat semua <ArrowRight className="size-3" />
+                </button>
+              ) : undefined
+            }
           />
-          <DataTable head={["No. PO", "Supplier", "Tgl", "Nilai", "Status"]}>
-            {recent.map((po) => (
-              <Row key={po.no} onClick={() => setSelected(po)}>
-                <Cell className="mono text-ink/90">{po.no}</Cell>
-                <Cell>{supplierName(po.supplierCode)}</Cell>
-                <Cell className="text-mute">{po.date.slice(5).split("-").reverse().join("/")}</Cell>
-                <Cell className="mono text-right">{idr(poTotals(po).total)}</Cell>
-                <Cell><StatusBadge label={po.status} /></Cell>
-              </Row>
-            ))}
-          </DataTable>
+          {po.loading ? (
+            <Panel text="Memuat Purchase Order…" />
+          ) : po.error ? (
+            <Panel text={labelError(po)} retry={() => setReload((x) => x + 1)} />
+          ) : recent.length ? (
+            <DataTable head={["No. PO", "Supplier / Outlet", "Tanggal", "Nilai", "Status"]} wide>
+              {recent.map((x) => (
+                <Row key={x.id} onClick={() => goTo("orders")}>
+                  <Cell className="mono">{x.poNo}</Cell>
+                  <Cell>
+                    <strong>{x.supplierName}</strong>
+                    <p className="text-xs text-mute">{x.outletName}</p>
+                  </Cell>
+                  <Cell>{date(x.orderDate)}</Cell>
+                  <Cell className="mono text-right">{money(x.grandTotal, x.currencyCode)}</Cell>
+                  <Cell>
+                    <StatusBadge label={x.status} />
+                  </Cell>
+                </Row>
+              ))}
+            </DataTable>
+          ) : (
+            <Panel text="Belum ada Purchase Order." />
+          )}
         </Card>
-
         <div className="space-y-4">
           <Card className="p-4">
             <div className="flex items-baseline justify-between">
-              <h2 className="text-[14px] font-semibold tracking-tight">Penggunaan Anggaran</h2>
-              <span className="text-[12px] text-mute">Agustus</span>
+              <h2 className="text-[14px] font-semibold">Anggaran Aktif</h2>
+              <span className="text-[12px] text-mute">Scope outlet</span>
             </div>
-            <p className="mt-2 text-[13px] text-mute">
-              Terpakai <span className="mono font-semibold text-ink">Rp 62,4 jt</span> dari <span className="mono">Rp 95 jt</span>
-            </p>
-            <div className="mt-2"><Progress value={66} /></div>
-            <p className="mt-1.5 text-[11px] font-medium text-olive">66% terpakai · aman di bawah threshold 80%</p>
+            {budgets.loading ? (
+              <p className="mt-3 text-xs text-mute">Memuat…</p>
+            ) : budgets.data ? (
+              <>
+                <p className="mt-2 text-[13px] text-mute">
+                  <span className="mono font-semibold text-ink">
+                    {money(
+                      activeBudgets.reduce((s, x) => s + Number(x.totalAmount), 0),
+                      currency,
+                    )}
+                  </span>{" "}
+                  dari {activeBudgets.length} Budget aktif
+                </p>
+                <div className="mt-2">
+                  <Progress value={0} />
+                </div>
+                <p className="mt-1.5 text-[11px] text-mute">
+                  Utilization tidak tersedia pada endpoint list; tidak dihitung secara semu.
+                </p>
+              </>
+            ) : (
+              <Unavailable value={budgets} />
+            )}
           </Card>
-
           <Card className="p-4">
-            <h2 className="text-[14px] font-semibold tracking-tight">Item Perhatian</h2>
-            <ul className="mt-3 space-y-2.5">
-              {[
-                { tone: "bg-terra", t: "Stok ayam potong menipis", s: "3 hari pemakaian · buat PO" },
-                { tone: "bg-terra", t: "Susu segar habis", s: "BHN-004 · perlu penerimaan hari ini" },
-                { tone: "bg-olive", t: "Harga kopi naik 8%", s: "PT Nusantara Rasa · review" },
-                { tone: "bg-ink/30", t: "PO-2026-0513 belum diterima", s: "CV Sabun & Sapa · telat 1 hari" },
-              ].map((a) => (
-                <li key={a.t} className="flex items-start gap-2.5">
-                  <span className={`mt-1.5 size-1.5 shrink-0 rounded-full ${a.tone}`} />
-                  <div className="text-[12.5px] leading-snug">
-                    <p className="font-medium">{a.t}</p>
-                    <p className="mt-0.5 text-mute">{a.s}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <h2 className="text-[14px] font-semibold">Item Perhatian</h2>
+            {inventory.loading ? (
+              <p className="mt-3 text-xs text-mute">Memuat Inventory…</p>
+            ) : attention.length ? (
+              <ul className="mt-3 space-y-2.5">
+                {attention.map((x) => (
+                  <li
+                    key={`${x.ingredientId}-${x.outletName}`}
+                    className="flex items-start gap-2.5"
+                  >
+                    <span
+                      className={`mt-1.5 size-1.5 rounded-full ${x.status === "out" || x.status === "critical" ? "bg-terra" : "bg-amber-500"}`}
+                    />
+                    <div className="text-[12.5px]">
+                      <p className="font-medium">{x.ingredientName}</p>
+                      <p className="text-mute">
+                        {x.sku} · {num(x.onHand)} {x.unitCode} · {x.outletName} · {x.status}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Unavailable value={inventory} empty="Tidak ada item kritis pada scope ini." />
+            )}
           </Card>
-
           <Card className="p-4">
-            <h2 className="text-[14px] font-semibold tracking-tight">Performa Supplier</h2>
+            <h2 className="text-[14px] font-semibold">Cakupan Master</h2>
             <ul className="mt-3 space-y-3">
-              {SUPPLIERS.filter((s) => s.active).slice(0, 4).map((s) => (
-                <li key={s.code}>
-                  <div className="flex items-center justify-between text-[12.5px]">
-                    <span className="font-medium">{s.name}</span>
-                    <span className={`mono ${s.perf < 85 ? "text-terra" : "text-mute"}`}>{s.perf}%</span>
-                  </div>
-                  <div className="mt-1.5"><Progress value={s.perf} warn={s.perf < 85} /></div>
-                </li>
-              ))}
+              <Coverage
+                label="Supplier aktif"
+                value={suppliers.data ? `${activeSuppliers.length}` : labelError(suppliers)}
+                warn={noCatalog > 0}
+              />
+              <Coverage
+                label="Menu aktif"
+                value={menus.data ? `${menus.data.active}` : labelError(menus)}
+              />
+              <Coverage
+                label="Recipe draft / approved"
+                value={
+                  recipes.data
+                    ? `${recipes.data.filter((x) => x.status === "draft").length} / ${recipes.data.filter((x) => x.status === "approved").length}`
+                    : labelError(recipes)
+                }
+              />
+              <Coverage
+                label="GR posted"
+                value={
+                  gr.data
+                    ? `${gr.data.filter((x) => x.status === "posted").length}`
+                    : labelError(gr)
+                }
+              />
             </ul>
           </Card>
         </div>
       </div>
-
-      {/* Drawer detail PO */}
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.no ?? ""} sub={selected ? supplierName(selected.supplierCode) : undefined}>
-        {selected && (
-          <div className="space-y-5">
-            <div className="flex items-center justify-between">
-              <StatusBadge label={selected.status} />
-              <span className="mono text-[15px] font-semibold">{idr(poTotals(selected).total)}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-[12.5px]">
-              <div><p className="text-mute">Tanggal PO</p><p className="mt-0.5 font-medium">{selected.date}</p></div>
-              <div><p className="text-mute">Ekspektasi kirim</p><p className="mt-0.5 font-medium">{selected.expected}</p></div>
-              <div><p className="text-mute">Outlet</p><p className="mt-0.5 font-medium">{selected.outlet}</p></div>
-              <div><p className="text-mute">Referensi</p><p className="mt-0.5 font-medium">{selected.ref ?? "—"}</p></div>
-            </div>
-            <div>
-              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-mute">Item</p>
-              <ul className="space-y-2">
-                {selected.items.map((it) => (
-                  <li key={it.sku} className="flex items-center justify-between rounded-lg bg-cream px-3 py-2 text-[12.5px] ring-1 ring-black/5">
-                    <span>{it.sku} × {it.qty}</span>
-                    <span className="mono">{idr(it.qty * it.price)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <p className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-mute">Histori</p>
-              <ol className="space-y-2 border-l border-black/10 pl-3">
-                {selected.history.map((h, i) => (
-                  <li key={i} className="text-[12.5px]">
-                    <p className="font-medium">{h.action}</p>
-                    <p className="text-mute">{h.at} · {h.by}</p>
-                  </li>
-                ))}
-              </ol>
-            </div>
-            <Btn className="w-full" onClick={() => { setSelected(null); goTo("orders"); }}>Buka di Purchase Order</Btn>
-          </div>
-        )}
-      </Drawer>
     </div>
   );
 }
-
+function Kpi({
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  tone: string;
+}) {
+  return (
+    <Card className="p-4">
+      <p className="text-[12px] font-medium text-mute">{label}</p>
+      <p className="mono mt-2 text-[26px] font-semibold tracking-tight">{value}</p>
+      <p className={`mt-1 text-[11px] font-medium ${tone}`}>{sub}</p>
+    </Card>
+  );
+}
+function Panel({ text, retry }: { text: string; retry?: () => void }) {
+  return (
+    <div className="grid min-h-40 place-items-center p-6 text-center">
+      <div>
+        <p className="text-xs text-mute">{text}</p>
+        {retry && (
+          <Btn className="mt-3" variant="outline" onClick={retry}>
+            Coba lagi
+          </Btn>
+        )}
+      </div>
+    </div>
+  );
+}
+function Unavailable<T>({
+  value,
+  empty = "Belum tersedia.",
+}: {
+  value: Source<T>;
+  empty?: string;
+}) {
+  return <p className="mt-3 text-xs text-mute">{value.error ? labelError(value) : empty}</p>;
+}
+function Coverage({
+  label,
+  value,
+  warn = false,
+}: {
+  label: string;
+  value: string;
+  warn?: boolean;
+}) {
+  return (
+    <li>
+      <div className="flex justify-between text-[12.5px]">
+        <span>{label}</span>
+        <Badge tone={warn ? "amber" : "neutral"}>{value}</Badge>
+      </div>
+    </li>
+  );
+}
+function labelError<T>(x: Source<T>) {
+  return x.error === "forbidden" ? "Tidak diizinkan" : x.error || "Belum tersedia";
+}
+function money(v: number, c = "IDR") {
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: c,
+    maximumFractionDigits: 2,
+  }).format(Number(v) || 0);
+}
+function num(v: number) {
+  return new Intl.NumberFormat("id-ID", { maximumFractionDigits: 3 }).format(Number(v) || 0);
+}
+function date(v: string) {
+  return new Date(`${v}T00:00:00`).toLocaleDateString("id-ID");
+}
 export { Badge };
