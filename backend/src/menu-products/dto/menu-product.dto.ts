@@ -86,6 +86,13 @@ export class CreateMenuVariantDto {
   @IsOptional()
   @IsBoolean()
   requiresRecipe?: boolean;
+  @ApiPropertyOptional({
+    default: true,
+    description: "Mengirim variant ke antrean dapur; independen dari Recipe.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  requiresKitchen?: boolean;
 }
 export class UpdateMenuVariantDto extends PartialType(CreateMenuVariantDto) {
   @ApiProperty() @IsInt() @Min(1) lockVersion!: number;

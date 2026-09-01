@@ -117,6 +117,17 @@ const permissionSeed = [
   ["menus.prices.manage", "menus", "Mengelola harga jual menu"],
   ["menus.outlets.manage", "menus", "Mengelola availability menu per outlet"],
   ["menus.audit.read", "menus", "Melihat audit trail menu"],
+  ["pos.read", "pos", "Melihat katalog dan transaksi POS"],
+  ["pos.create", "pos", "Membuat transaksi POS draft"],
+  ["pos.update", "pos", "Mengubah transaksi POS draft"],
+  ["pos.submit", "pos", "Mengirim transaksi POS ke proses produksi"],
+  ["pos.pay", "pos", "Mencatat pembayaran transaksi POS"],
+  ["pos.complete", "pos", "Menyelesaikan transaksi POS"],
+  ["pos.cancel", "pos", "Membatalkan transaksi POS belum dibayar"],
+  ["pos.void", "pos", "Melakukan void dan refund manual transaksi POS"],
+  ["kds.read", "kds", "Melihat antrean Kitchen Display"],
+  ["kds.update", "kds", "Memperbarui status produksi Kitchen Display"],
+  ["kds.cancel", "kds", "Membatalkan item Kitchen Display dengan alasan"],
 ] as const;
 
 async function main(): Promise<void> {

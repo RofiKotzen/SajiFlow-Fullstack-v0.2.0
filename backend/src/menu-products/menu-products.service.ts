@@ -527,6 +527,7 @@ export class MenuProductsService {
         isDefault: dto.isDefault ?? false,
         displayOrder: dto.displayOrder ?? 0,
         requiresRecipe: dto.requiresRecipe ?? menu.itemType === "recipe",
+        requiresKitchen: dto.requiresKitchen ?? true,
         createdBy: actor.userId,
         updatedBy: actor.userId,
       })
@@ -570,6 +571,9 @@ export class MenuProductsService {
           : {}),
         ...(dto.requiresRecipe !== undefined
           ? { requiresRecipe: dto.requiresRecipe }
+          : {}),
+        ...(dto.requiresKitchen !== undefined
+          ? { requiresKitchen: dto.requiresKitchen }
           : {}),
         lockVersion: sql`${menuVariants.lockVersion} + 1`,
         updatedAt: new Date(),
@@ -838,6 +842,7 @@ export class MenuProductsService {
         variantName: menuVariants.name,
         variantActive: menuVariants.isActive,
         requiresRecipe: menuVariants.requiresRecipe,
+        requiresKitchen: menuVariants.requiresKitchen,
         baseSellingPrice: menuVariants.sellingPrice,
         currencyCode: menuVariants.currencyCode,
         outletSettingId: menuVariantOutletSettings.id,
@@ -1005,6 +1010,7 @@ export class MenuProductsService {
         variantSku: menuVariants.code,
         variantName: menuVariants.name,
         requiresRecipe: menuVariants.requiresRecipe,
+        requiresKitchen: menuVariants.requiresKitchen,
         baseSellingPrice: menuVariants.sellingPrice,
         currencyCode: menuVariants.currencyCode,
         priceOverride: menuVariantOutletSettings.priceOverride,
@@ -1101,6 +1107,7 @@ export class MenuProductsService {
         isDefault: menuVariants.isDefault,
         displayOrder: menuVariants.displayOrder,
         requiresRecipe: menuVariants.requiresRecipe,
+        requiresKitchen: menuVariants.requiresKitchen,
         isActive: menuVariants.isActive,
         archivedAt: menuVariants.archivedAt,
         archiveReason: menuVariants.archiveReason,

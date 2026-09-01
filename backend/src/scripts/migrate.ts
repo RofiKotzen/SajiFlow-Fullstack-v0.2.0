@@ -1,9 +1,12 @@
 import "dotenv/config";
-import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import postgres from "postgres";
-import { splitMigrationBatches } from "./migration-source";
+import {
+  migrationChecksum,
+  splitMigrationBatches,
+  stripOuterTransaction,
+} from "./migration-source";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -13,8 +16,11 @@ async function main(): Promise<void> {
     ssl: process.env.DATABASE_SSL === "true" ? "require" : false,
     max: 1,
   });
+  let migrationLockHeld = false;
 
   try {
+    await client`select pg_advisory_lock(hashtext('sajiflow_schema_migrations'))`;
+    migrationLockHeld = true;
     await client`
       create table if not exists public.schema_migrations (
         filename text primary key,
@@ -30,7 +36,7 @@ async function main(): Promise<void> {
 
     for (const filename of files) {
       const source = await readFile(resolve(directory, filename), "utf8");
-      const checksum = createHash("sha256").update(source).digest("hex");
+      const checksum = migrationChecksum(source);
       const [applied] = await client<{ checksum: string }[]>`
         select checksum from public.schema_migrations where filename = ${filename}
       `;
@@ -57,6 +63,16 @@ async function main(): Promise<void> {
 
       console.log(`APPLY ${filename}`);
       const batches = splitMigrationBatches(source);
+      if (batches.length === 1) {
+        const body = stripOuterTransaction(batches[0]);
+        await client.begin(async (tx) => {
+          await tx.unsafe(body);
+          await tx`
+            insert into public.schema_migrations (filename, checksum) values (${filename}, ${checksum})
+          `;
+        });
+        continue;
+      }
       for (const [index, batch] of batches.entries()) {
         if (batches.length > 1)
           console.log(`  BATCH ${index + 1}/${batches.length}`);
@@ -67,6 +83,8 @@ async function main(): Promise<void> {
       `;
     }
   } finally {
+    if (migrationLockHeld)
+      await client`select pg_advisory_unlock(hashtext('sajiflow_schema_migrations'))`;
     await client.end({ timeout: 5 });
   }
 }

@@ -105,6 +105,51 @@ export const stockMovementStatus = pgEnum("stock_movement_status", [
   "posted",
   "reversed",
 ]);
+export const salesOrderType = pgEnum("sales_order_type", [
+  "dine_in",
+  "takeaway",
+]);
+export const salesOrderStatus = pgEnum("sales_order_status", [
+  "draft",
+  "submitted",
+  "preparing",
+  "ready",
+  "completed",
+  "cancelled",
+]);
+export const salesOrderItemStatus = pgEnum("sales_order_item_status", [
+  "draft",
+  "queued",
+  "preparing",
+  "ready",
+  "completed",
+  "cancelled",
+]);
+export const posPaymentMethod = pgEnum("pos_payment_method", [
+  "cash",
+  "qris_manual",
+  "card_manual",
+]);
+export const posPaymentStatus = pgEnum("pos_payment_status", [
+  "unpaid",
+  "paid",
+  "voided",
+]);
+export const posPaymentEntryType = pgEnum("pos_payment_entry_type", [
+  "payment",
+  "manual_refund",
+]);
+export const posOperationStatus = pgEnum("pos_operation_status", [
+  "processing",
+  "completed",
+  "failed",
+]);
+export const salesConsumptionStatus = pgEnum("sales_consumption_status", [
+  "planned",
+  "posted",
+  "reversed",
+  "skipped_optional",
+]);
 
 const auditColumns = {
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -574,6 +619,7 @@ export const menuVariants = pgTable(
     isDefault: boolean("is_default").notNull().default(false),
     displayOrder: integer("display_order").notNull().default(0),
     requiresRecipe: boolean("requires_recipe").notNull().default(true),
+    requiresKitchen: boolean("requires_kitchen").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     archivedBy: uuid("archived_by"),
@@ -1229,6 +1275,11 @@ export const stockMovements = pgTable(
   },
   (table) => [
     uniqueIndex("uq_stock_movement_no").on(table.outletId, table.movementNo),
+    uniqueIndex("uq_stock_movement_sales_order")
+      .on(table.tenantId, table.referenceId)
+      .where(
+        sql`${table.referenceType} = 'sales_order' and ${table.movementType} = 'sale_consumption' and ${table.status} = 'posted'`,
+      ),
     index("ix_stock_movements_tenant_id").on(table.tenantId),
     index("ix_stock_movements_outlet_id").on(table.outletId),
   ],
@@ -1270,5 +1321,390 @@ export const stockMovementLines = pgTable(
     index("ix_stock_movement_lines_stock_movement_id").on(
       table.stockMovementId,
     ),
+  ],
+);
+
+export const salesOrders = pgTable(
+  "sales_orders",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    orderNo: varchar("order_no", { length: 50 }).notNull(),
+    receiptNo: varchar("receipt_no", { length: 50 }),
+    businessDate: date("business_date").notNull(),
+    orderType: salesOrderType("order_type").notNull(),
+    tableNumber: varchar("table_number", { length: 30 }),
+    customerName: varchar("customer_name", { length: 150 }),
+    notes: text("notes"),
+    currencyCode: char("currency_code", { length: 3 }).notNull(),
+    status: salesOrderStatus("status").notNull().default("draft"),
+    paymentStatus: posPaymentStatus("payment_status")
+      .notNull()
+      .default("unpaid"),
+    subtotal: numeric("subtotal", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    totalAmount: numeric("total_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    createdBy: uuid("created_by").notNull(),
+    cashierId: uuid("cashier_id").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    submittedBy: uuid("submitted_by"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    completedBy: uuid("completed_by"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: uuid("cancelled_by"),
+    cancellationReason: text("cancellation_reason"),
+    lockVersion: integer("lock_version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: uuid("updated_by"),
+  },
+  (table) => [
+    uniqueIndex("uq_sales_orders_number").on(
+      table.tenantId,
+      table.outletId,
+      table.orderNo,
+    ),
+    uniqueIndex("uq_sales_orders_tenant_id").on(table.tenantId, table.id),
+    uniqueIndex("uq_sales_orders_scope_id").on(
+      table.tenantId,
+      table.outletId,
+      table.id,
+    ),
+    uniqueIndex("uq_sales_orders_receipt")
+      .on(table.tenantId, table.outletId, table.receiptNo)
+      .where(sql`${table.receiptNo} is not null`),
+    index("ix_sales_orders_scope_date").on(
+      table.tenantId,
+      table.outletId,
+      table.businessDate,
+    ),
+    index("ix_sales_orders_scope_status").on(
+      table.tenantId,
+      table.outletId,
+      table.status,
+      table.updatedAt,
+    ),
+    index("ix_sales_orders_cashier").on(
+      table.tenantId,
+      table.cashierId,
+      table.businessDate,
+    ),
+  ],
+);
+
+export const salesOrderItems = pgTable(
+  "sales_order_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    salesOrderId: uuid("sales_order_id").notNull(),
+    lineNo: integer("line_no").notNull(),
+    menuId: uuid("menu_id").notNull(),
+    menuCodeSnapshot: varchar("menu_code_snapshot", { length: 50 }).notNull(),
+    menuNameSnapshot: varchar("menu_name_snapshot", {
+      length: 150,
+    }).notNull(),
+    menuVariantId: uuid("menu_variant_id").notNull(),
+    variantCodeSnapshot: varchar("variant_code_snapshot", {
+      length: 40,
+    }).notNull(),
+    variantNameSnapshot: varchar("variant_name_snapshot", {
+      length: 100,
+    }).notNull(),
+    menuCategoryId: uuid("menu_category_id").notNull(),
+    categoryCodeSnapshot: varchar("category_code_snapshot", {
+      length: 40,
+    }).notNull(),
+    categoryNameSnapshot: varchar("category_name_snapshot", {
+      length: 100,
+    }).notNull(),
+    effectivePriceSource: varchar("effective_price_source", {
+      length: 24,
+    }).notNull(),
+    priceSourceVersionAt: timestamp("price_source_version_at", {
+      withTimezone: true,
+    }).notNull(),
+    unitPrice: numeric("unit_price", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    quantity: integer("quantity").notNull(),
+    lineSubtotal: numeric("line_subtotal", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    currencyCode: char("currency_code", { length: 3 }).notNull(),
+    notes: text("notes"),
+    requiresRecipe: boolean("requires_recipe").notNull(),
+    requiresKitchen: boolean("requires_kitchen").notNull(),
+    recipeHeaderId: uuid("recipe_header_id"),
+    recipeVersionId: uuid("recipe_version_id"),
+    recipeVersionNo: integer("recipe_version_no"),
+    status: salesOrderItemStatus("status").notNull().default("draft"),
+    queuedAt: timestamp("queued_at", { withTimezone: true }),
+    preparingAt: timestamp("preparing_at", { withTimezone: true }),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledBy: uuid("cancelled_by"),
+    cancellationReason: text("cancellation_reason"),
+    lockVersion: integer("lock_version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: uuid("created_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: uuid("updated_by"),
+  },
+  (table) => [
+    uniqueIndex("uq_sales_order_item_line").on(
+      table.salesOrderId,
+      table.lineNo,
+    ),
+    uniqueIndex("uq_sales_order_items_scope_id").on(
+      table.tenantId,
+      table.salesOrderId,
+      table.id,
+    ),
+    index("ix_sales_order_items_order").on(
+      table.tenantId,
+      table.salesOrderId,
+      table.lineNo,
+    ),
+    index("ix_sales_order_items_kitchen_queue")
+      .on(table.tenantId, table.status, table.queuedAt)
+      .where(sql`${table.requiresKitchen} = true`),
+    index("ix_sales_order_items_variant").on(
+      table.tenantId,
+      table.menuVariantId,
+    ),
+  ],
+);
+
+export const salesOrderItemStatusHistory = pgTable(
+  "sales_order_item_status_history",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    salesOrderId: uuid("sales_order_id").notNull(),
+    salesOrderItemId: uuid("sales_order_item_id").notNull(),
+    fromStatus: salesOrderItemStatus("from_status"),
+    toStatus: salesOrderItemStatus("to_status").notNull(),
+    changedBy: uuid("changed_by").notNull(),
+    reason: text("reason"),
+    changedAt: timestamp("changed_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("ix_sales_item_history_item_time").on(
+      table.tenantId,
+      table.salesOrderItemId,
+      table.changedAt,
+    ),
+    index("ix_sales_item_history_order_time").on(
+      table.tenantId,
+      table.salesOrderId,
+      table.changedAt,
+    ),
+  ],
+);
+
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    salesOrderId: uuid("sales_order_id").notNull(),
+    originalPaymentId: uuid("original_payment_id"),
+    entryType: posPaymentEntryType("entry_type").notNull().default("payment"),
+    method: posPaymentMethod("method").notNull(),
+    status: posPaymentStatus("status").notNull(),
+    currencyCode: char("currency_code", { length: 3 }).notNull(),
+    amountApplied: numeric("amount_applied", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    amountTendered: numeric("amount_tendered", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }).notNull(),
+    changeAmount: numeric("change_amount", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    externalReference: varchar("external_reference", { length: 150 }),
+    reason: text("reason"),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    cashierId: uuid("cashier_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: uuid("created_by").notNull(),
+  },
+  (table) => [
+    uniqueIndex("uq_payments_scope_id").on(table.tenantId, table.id),
+    uniqueIndex("uq_payments_order_entry")
+      .on(table.tenantId, table.salesOrderId)
+      .where(sql`${table.entryType} = 'payment'`),
+    uniqueIndex("uq_payments_refund_original")
+      .on(table.tenantId, table.originalPaymentId)
+      .where(sql`${table.entryType} = 'manual_refund'`),
+    index("ix_payments_order").on(
+      table.tenantId,
+      table.salesOrderId,
+      table.createdAt,
+    ),
+    index("ix_payments_reference")
+      .on(table.tenantId, table.externalReference)
+      .where(sql`${table.externalReference} is not null`),
+  ],
+);
+
+export const salesItemConsumptions = pgTable(
+  "sales_item_consumptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    salesOrderId: uuid("sales_order_id").notNull(),
+    salesOrderItemId: uuid("sales_order_item_id").notNull(),
+    recipeVersionId: uuid("recipe_version_id").notNull(),
+    recipeItemId: uuid("recipe_item_id").notNull(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    ingredientSkuSnapshot: varchar("ingredient_sku_snapshot", {
+      length: 50,
+    }).notNull(),
+    ingredientNameSnapshot: varchar("ingredient_name_snapshot", {
+      length: 150,
+    }).notNull(),
+    baseUnitCodeSnapshot: varchar("base_unit_code_snapshot", {
+      length: 20,
+    }).notNull(),
+    isOptional: boolean("is_optional").notNull().default(false),
+    requiredBaseQuantity: numeric("required_base_quantity", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }).notNull(),
+    consumedBaseQuantity: numeric("consumed_base_quantity", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    })
+      .notNull()
+      .default(0),
+    status: salesConsumptionStatus("status").notNull().default("planned"),
+    skippedReason: varchar("skipped_reason", { length: 80 }),
+    stockBatchId: uuid("stock_batch_id"),
+    stockMovementId: uuid("stock_movement_id"),
+    stockMovementLineId: uuid("stock_movement_line_id"),
+    reversalStockMovementLineId: uuid("reversal_stock_movement_line_id"),
+    unitCostSnapshot: numeric("unit_cost_snapshot", {
+      precision: 18,
+      scale: 6,
+      mode: "number",
+    }),
+    valueSnapshot: numeric("value_snapshot", {
+      precision: 18,
+      scale: 2,
+      mode: "number",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdBy: uuid("created_by").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedBy: uuid("updated_by"),
+  },
+  (table) => [
+    uniqueIndex("uq_sales_consumption_allocation").on(
+      table.salesOrderItemId,
+      table.recipeItemId,
+      table.stockBatchId,
+    ),
+    uniqueIndex("uq_sales_consumption_unallocated")
+      .on(table.salesOrderItemId, table.recipeItemId)
+      .where(sql`${table.stockBatchId} is null`),
+    index("ix_sales_consumptions_order").on(
+      table.tenantId,
+      table.salesOrderId,
+    ),
+    index("ix_sales_consumptions_item").on(
+      table.tenantId,
+      table.salesOrderItemId,
+    ),
+    index("ix_sales_consumptions_movement")
+      .on(table.tenantId, table.stockMovementId)
+      .where(sql`${table.stockMovementId} is not null`),
+  ],
+);
+
+export const posOperationRequests = pgTable(
+  "pos_operation_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id").notNull(),
+    outletId: uuid("outlet_id").notNull(),
+    idempotencyKey: uuid("idempotency_key").notNull(),
+    operation: varchar("operation", { length: 60 }).notNull(),
+    requestHash: char("request_hash", { length: 64 }).notNull(),
+    status: posOperationStatus("status").notNull().default("processing"),
+    salesOrderId: uuid("sales_order_id"),
+    paymentId: uuid("payment_id"),
+    responseStatus: integer("response_status"),
+    responseBody: jsonb("response_body"),
+    errorCode: varchar("error_code", { length: 80 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true })
+      .notNull()
+      .default(sql`now() + interval '5 minutes'`),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("uq_pos_operation_idempotency").on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+    index("ix_pos_operations_scope_time").on(
+      table.tenantId,
+      table.outletId,
+      table.createdAt,
+    ),
+    index("ix_pos_operations_order")
+      .on(table.tenantId, table.salesOrderId)
+      .where(sql`${table.salesOrderId} is not null`),
   ],
 );
