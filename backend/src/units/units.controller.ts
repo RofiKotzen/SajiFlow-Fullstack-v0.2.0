@@ -15,13 +15,24 @@ import { AuthUser } from "../common/types/auth-user";
 import { CreateUnitDto } from "./dto/create-unit.dto";
 import { ListUnitsQueryDto } from "./dto/list-units-query.dto";
 import { UpdateUnitDto } from "./dto/update-unit.dto";
+import { CreateUnitConversionDto, UpdateUnitConversionDto } from "./dto/unit-conversion.dto";
+import { UnitConversionsService } from "./unit-conversions.service";
 import { UnitsService } from "./units.service";
 
 @ApiTags("Units")
 @ApiBearerAuth()
 @Controller("units")
 export class UnitsController {
-  constructor(private readonly units: UnitsService) {}
+  constructor(private readonly units: UnitsService, private readonly conversions: UnitConversionsService) {}
+  @Get("conversions") @RequirePermissions("units.read") listConversions(@CurrentUser() u: AuthUser) {
+    return this.conversions.list(u);
+  }
+  @Post("conversions") @RequirePermissions("units.create") createConversion(@CurrentUser() u: AuthUser, @Body() dto: CreateUnitConversionDto) {
+    return this.conversions.create(u, dto);
+  }
+  @Patch("conversions/:id") @RequirePermissions("units.update") updateConversion(@CurrentUser() u: AuthUser, @Param("id", ParseUUIDPipe) id: string, @Body() dto: UpdateUnitConversionDto) {
+    return this.conversions.update(u, id, dto);
+  }
   @Get() @RequirePermissions("units.read") list(
     @CurrentUser() u: AuthUser,
     @Query() q: ListUnitsQueryDto,

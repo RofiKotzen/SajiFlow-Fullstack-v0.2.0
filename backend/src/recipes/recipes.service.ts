@@ -39,9 +39,9 @@ import {
   supplierIngredients,
   suppliers,
   tenants,
-  unitConversions,
   units,
 } from "../database/schema";
+import { UnitConversionResolver } from "../units/unit-conversion-resolver.service";
 import { EffectivePriceService } from "../menu-products/effective-price.service";
 import { InventoryValuationService } from "../inventory/inventory-valuation.service";
 import { ArchiveRecipeDto, ListRecipesDto } from "./dto/recipe-actions.dto";
@@ -65,6 +65,7 @@ export class RecipesService {
     private readonly database: DatabaseService,
     private readonly valuation: InventoryValuationService,
     private readonly effectivePrice: EffectivePriceService,
+    private readonly conversions: UnitConversionResolver,
   ) {}
 
   async list(actor: AuthUser, query: ListRecipesDto) {
@@ -1134,26 +1135,7 @@ export class RecipesService {
         throw new BadRequestException(
           "Dimensi unit tidak kompatibel dengan base unit ingredient.",
         );
-      let conversion = "1.000000000";
-      if (line.unitId !== master.ingredient.baseUnitId) {
-        const [row] = await this.database.db
-          .select()
-          .from(unitConversions)
-          .where(
-            and(
-              eq(unitConversions.tenantId, actor.tenantId),
-              eq(unitConversions.fromUnitId, line.unitId),
-              eq(unitConversions.toUnitId, master.ingredient.baseUnitId),
-              eq(unitConversions.isActive, true),
-            ),
-          )
-          .limit(1);
-        if (!row)
-          throw new BadRequestException(
-            "Konversi ke base unit tidak tersedia.",
-          );
-        conversion = row.factor;
-      }
+      const conversion = await this.conversions.resolve(actor.tenantId, line.unitId, master.ingredient.baseUnitId);
       const net = decimal(line.netQuantity, 6);
       const denominator = 10000n - waste;
       const gross = divide(net, denominator, 6, 4);

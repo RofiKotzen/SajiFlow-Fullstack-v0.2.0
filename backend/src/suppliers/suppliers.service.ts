@@ -21,12 +21,15 @@ import { CreateSupplierDto } from "./dto/create-supplier.dto";
 import { ListSuppliersQueryDto } from "./dto/list-suppliers-query.dto";
 import { UpdateSupplierCatalogDto } from "./dto/update-supplier-catalog.dto";
 import { UpdateSupplierDto } from "./dto/update-supplier.dto";
+import { UnitConversionResolver } from "../units/unit-conversion-resolver.service";
+import { decimal, formatDecimal } from "../recipes/recipe-decimal";
 
 @Injectable()
 export class SuppliersService {
   constructor(
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
+    private readonly conversions: UnitConversionResolver,
   ) {}
 
   async list(actor: AuthUser, query: ListSuppliersQueryDto) {
@@ -309,7 +312,7 @@ export class SuppliersService {
     dto: CreateSupplierCatalogDto,
   ) {
     await this.assertSupplierActive(actor.tenantId, supplierId);
-    await this.validateCatalogReferences(
+    const conversion = await this.validateCatalogReferences(
       actor.tenantId,
       dto.ingredientId,
       dto.purchaseUnitId,
@@ -353,7 +356,7 @@ export class SuppliersService {
           ingredientId: dto.ingredientId,
           purchaseUnitId: dto.purchaseUnitId,
           supplierSku: this.clean(dto.supplierSku),
-          conversionToBase: dto.conversionToBase,
+          conversionToBase: Number(conversion),
           lastPrice: dto.lastPrice,
           minimumOrderQty: dto.minimumOrderQty ?? 1,
           isPreferred: dto.isPreferred ?? false,
@@ -384,13 +387,13 @@ export class SuppliersService {
     const before = await this.getCatalog(actor.tenantId, supplierId, catalogId);
     const ingredientId = dto.ingredientId ?? before.ingredientId;
     const purchaseUnitId = dto.purchaseUnitId ?? before.purchaseUnitId;
-    const conversion = dto.conversionToBase ?? Number(before.conversionToBase);
+    const requestedConversion = dto.conversionToBase ?? Number(before.conversionToBase);
     await this.assertSupplierActive(actor.tenantId, supplierId);
-    await this.validateCatalogReferences(
+    const conversion = await this.validateCatalogReferences(
       actor.tenantId,
       ingredientId,
       purchaseUnitId,
-      conversion,
+      requestedConversion,
     );
     if (
       ingredientId !== before.ingredientId ||
@@ -427,7 +430,7 @@ export class SuppliersService {
           ...dto,
           ingredientId,
           purchaseUnitId,
-          conversionToBase: conversion,
+          conversionToBase: Number(conversion),
           ...(dto.supplierSku !== undefined
             ? { supplierSku: this.clean(dto.supplierSku) }
             : {}),
@@ -513,7 +516,7 @@ export class SuppliersService {
     ingredientId: string,
     purchaseUnitId: string,
     conversion: number,
-  ) {
+  ): Promise<string> {
     const [ingredient] = await this.database.db
       .select({
         id: ingredients.id,
@@ -555,10 +558,14 @@ export class SuppliersService {
       throw new BadRequestException(
         "Dimensi purchase unit harus sama dengan base unit bahan.",
       );
-    if (ingredient.baseUnitId === purchaseUnitId && Number(conversion) !== 1)
+    const resolved = await this.conversions.resolve(tenantId, purchaseUnitId, ingredient.baseUnitId);
+    const requested = formatDecimal(decimal(String(conversion), 6), 6);
+    const authoritative = formatDecimal(decimal(resolved, 6), 6);
+    if (requested !== authoritative)
       throw new BadRequestException(
-        "Conversion harus 1 ketika purchase unit sama dengan base unit.",
+        "Conversion katalog bertentangan dengan master konversi satuan.",
       );
+    return authoritative;
   }
   private async assertUniqueCode(
     tenantId: string,
