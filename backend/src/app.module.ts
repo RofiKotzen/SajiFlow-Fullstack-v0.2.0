@@ -23,6 +23,7 @@ import { UnitsModule } from "./units/units.module";
 import { RecipesModule } from "./recipes/recipes.module";
 import { MenuProductsModule } from "./menu-products/menu-products.module";
 import { PosModule } from "./pos/pos.module";
+import { KdsModule } from "./kds/kds.module";
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { PosModule } from "./pos/pos.module";
     RecipesModule,
     MenuProductsModule,
     PosModule,
+    KdsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

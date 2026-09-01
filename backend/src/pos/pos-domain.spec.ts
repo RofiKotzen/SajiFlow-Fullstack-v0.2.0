@@ -138,6 +138,27 @@ describe("POS Phase 1 domain rules", () => {
     expect(shouldConsumeRecipeItem(true)).toBe(false);
   });
 
+  it("keeps KDS order preparing until kitchen and non-kitchen items are done", () => {
+    expect(
+      aggregateOrderStatus("preparing", [
+        { status: "ready", requiresKitchen: true },
+        { status: "queued", requiresKitchen: true },
+      ]),
+    ).toBe("preparing");
+    expect(
+      aggregateOrderStatus("preparing", [
+        { status: "ready", requiresKitchen: true },
+        { status: "queued", requiresKitchen: false },
+      ]),
+    ).toBe("preparing");
+    expect(
+      aggregateOrderStatus("preparing", [
+        { status: "ready", requiresKitchen: true },
+        { status: "completed", requiresKitchen: false },
+      ]),
+    ).toBe("ready");
+  });
+
   it("calculates authoritative draft totals without floating point", () => {
     expect(formatMinor(multiplyMoney("1000000000000.25", 3))).toBe(
       "3000000000000.75",

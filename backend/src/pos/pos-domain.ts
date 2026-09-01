@@ -94,9 +94,17 @@ export function aggregateOrderStatus(
     return current;
   const kitchen = items.filter((item) => item.requiresKitchen);
   if (!kitchen.length) return "ready";
-  if (kitchen.every((item) => ["ready", "completed"].includes(item.status)))
+  if (
+    kitchen.every((item) => ["ready", "completed"].includes(item.status)) &&
+    items
+      .filter((item) => !item.requiresKitchen)
+      .every((item) => item.status === "completed")
+  )
     return "ready";
-  if (kitchen.some((item) => item.status === "preparing")) return "preparing";
+  if (
+    kitchen.some((item) => ["preparing", "ready"].includes(item.status))
+  )
+    return "preparing";
   return "submitted";
 }
 
