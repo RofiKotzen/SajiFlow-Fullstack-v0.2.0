@@ -114,6 +114,23 @@ describe("POS Phase 1 domain rules", () => {
     ).toThrow();
     expect(() => calculatePayment("NaN", "cash", "50000")).toThrow();
     expect(() => calculatePayment("1.001", "cash", "50000")).toThrow();
+    expect(calculatePayment("0.01", "cash", "0.02")).toEqual({
+      amountApplied: "0.01",
+      amountTendered: "0.02",
+      changeAmount: "0.01",
+    });
+    expect(
+      calculatePayment(
+        "999999999999999.99",
+        "card_manual",
+        "999999999999999.99",
+        "CARD-LARGE",
+      ),
+    ).toEqual({
+      amountApplied: "999999999999999.99",
+      amountTendered: "999999999999999.99",
+      changeAmount: "0.00",
+    });
   });
 
   it("skips optional Recipe items in Phase 1", () => {

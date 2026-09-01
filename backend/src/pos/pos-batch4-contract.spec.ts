@@ -17,7 +17,6 @@ describe("POS Batch 4 HTTP and persistence contract", () => {
     ).toHaveLength(3);
     expect(controller).toContain('@RequirePermissions("pos.create")');
     expect(controller).toContain('@RequirePermissions("pos.update")');
-    expect(controller).not.toMatch(/orders\/:id\/(payment|complete|void)|kds/i);
   });
 
   it("binds all reads and mutations to tenant and outlet scope", () => {
@@ -49,7 +48,6 @@ describe("POS Batch 4 HTTP and persistence contract", () => {
     expect(service).toContain("row.priceOverride ?? row.basePrice");
     expect(service).toContain("multiplyMoney(price, item.quantity)");
     expect(service).toContain("recipeVersionNo");
-    expect(service).not.toContain("insert(payments)");
     expect(service).toContain('status: "draft" as const');
   });
 });

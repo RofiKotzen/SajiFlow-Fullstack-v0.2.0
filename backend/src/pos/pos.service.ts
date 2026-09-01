@@ -53,10 +53,13 @@ import {
   PosMutationDto,
   PosOrderItemDto,
   PosReasonMutationDto,
+  RecordPosPaymentDto,
   UpdatePosOrderDto,
+  VoidPosOrderDto,
 } from "./dto/pos.dto";
 import {
   assertOrderIdentity,
+  calculatePayment,
   formatMinor,
   multiplyMoney,
   parseDecimalToMinor,
@@ -185,8 +188,9 @@ export class PosService {
         .select({
           id: salesOrders.id,
           outletId: salesOrders.outletId,
-          outletName: outlets.name,
-          orderNo: salesOrders.orderNo,
+              outletName: outlets.name,
+              orderNo: salesOrders.orderNo,
+              receiptNo: salesOrders.receiptNo,
           businessDate: salesOrders.businessDate,
           orderType: salesOrders.orderType,
           tableNumber: salesOrders.tableNumber,
@@ -258,7 +262,23 @@ export class PosService {
           )
           .orderBy(asc(salesOrderItemStatusHistory.changedAt)),
         this.database.db
-          .select()
+          .select({
+            id: payments.id,
+            originalPaymentId: payments.originalPaymentId,
+            entryType: payments.entryType,
+            method: payments.method,
+            status: payments.status,
+            currencyCode: payments.currencyCode,
+            amountApplied: payments.amountApplied,
+            amountTendered: payments.amountTendered,
+            changeAmount: payments.changeAmount,
+            externalReference: payments.externalReference,
+            reason: payments.reason,
+            paidAt: payments.paidAt,
+            voidedAt: payments.voidedAt,
+            cashierId: payments.cashierId,
+            createdAt: payments.createdAt,
+          })
           .from(payments)
           .where(
             and(
@@ -667,6 +687,528 @@ export class PosService {
         },
       });
       await this.completeOperation(tx, operation.id, id);
+      return { orderId: id };
+    });
+    return this.get(actor, result.orderId);
+  }
+
+  async pay(actor: AuthUser, id: string, dto: RecordPosPaymentDto) {
+    const visible = await this.getBase(actor.tenantId, id, this.database.db);
+    if (!visible) throw new NotFoundException("Order POS tidak ditemukan.");
+    await this.assertOutletAccess(actor, visible.outletId);
+    const externalReference = dto.externalReference?.trim() || null;
+    const requestHash = this.requestHash({
+      operation: "record_payment",
+      orderId: id,
+      ...dto,
+      externalReference,
+    });
+
+    const result = await this.database.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select id from sales_orders where id = ${id} and tenant_id = ${actor.tenantId} and outlet_id = ${visible.outletId} for update`,
+      );
+      const current = await this.getBase(actor.tenantId, id, tx);
+      if (!current) throw new NotFoundException("Order POS tidak ditemukan.");
+      const operation = await this.acquireOperation(
+        tx,
+        actor,
+        current.outletId,
+        dto.idempotencyKey,
+        "record_payment",
+        requestHash,
+      );
+      if (operation.replay) return { orderId: id };
+      if (current.lockVersion !== dto.lockVersion)
+        throw new ConflictException(
+          "STALE_ORDER_VERSION: Muat ulang order sebelum pembayaran.",
+        );
+      if (["draft", "cancelled", "completed"].includes(current.status))
+        throw new ConflictException(
+          "ORDER_NOT_PAYABLE: Order belum submitted atau sudah terminal.",
+        );
+      if (current.paymentStatus !== "unpaid")
+        throw new ConflictException("ORDER_ALREADY_PAID");
+      if (parseDecimalToMinor(current.totalAmount) <= 0n)
+        throw new ConflictException("ORDER_TOTAL_INVALID");
+      const totalMinor = parseDecimalToMinor(current.totalAmount);
+      const tenderedMinor = parseDecimalToMinor(dto.amountTendered);
+      if (dto.method === "cash" && tenderedMinor < totalMinor)
+        throw new BadRequestException(
+          "PAYMENT_AMOUNT_INSUFFICIENT: Uang tunai tidak mencukupi.",
+        );
+      if (dto.method !== "cash" && !externalReference)
+        throw new BadRequestException(
+          "PAYMENT_REFERENCE_REQUIRED: Referensi pembayaran wajib diisi.",
+        );
+      if (dto.method !== "cash" && tenderedMinor !== totalMinor)
+        throw new BadRequestException(
+          "PAYMENT_AMOUNT_MISMATCH: Nominal pembayaran non-tunai harus sama dengan total order.",
+        );
+
+      const [movement] = await tx
+        .select({ id: stockMovements.id })
+        .from(stockMovements)
+        .where(
+          and(
+            eq(stockMovements.tenantId, actor.tenantId),
+            eq(stockMovements.outletId, current.outletId),
+            eq(stockMovements.referenceType, "sales_order"),
+            eq(stockMovements.referenceId, id),
+            eq(stockMovements.movementType, "sale_consumption"),
+            eq(stockMovements.status, "posted"),
+          ),
+        )
+        .limit(1);
+      if (!movement)
+        throw new ConflictException("CONSUMPTION_NOT_POSTED");
+      if (current.items.some((item: any) => item.requiresRecipe)) {
+        const [posted] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(salesItemConsumptions)
+          .where(
+            and(
+              eq(salesItemConsumptions.tenantId, actor.tenantId),
+              eq(salesItemConsumptions.salesOrderId, id),
+              eq(salesItemConsumptions.status, "posted"),
+            ),
+          );
+        if (!posted?.count)
+          throw new ConflictException("CONSUMPTION_NOT_POSTED");
+      }
+
+      let calculated: ReturnType<typeof calculatePayment>;
+      try {
+        calculated = calculatePayment(
+          this.moneyString(current.totalAmount),
+          dto.method,
+          dto.amountTendered,
+          externalReference ?? undefined,
+        );
+      } catch (error) {
+        throw new BadRequestException(
+          error instanceof Error ? error.message : "PAYMENT_INVALID",
+        );
+      }
+      if (externalReference) {
+        const [duplicateReference] = await tx
+          .select({ id: payments.id })
+          .from(payments)
+          .where(
+            and(
+              eq(payments.tenantId, actor.tenantId),
+              eq(payments.outletId, current.outletId),
+              eq(payments.externalReference, externalReference),
+            ),
+          )
+          .limit(1);
+        if (duplicateReference)
+          throw new ConflictException("PAYMENT_REFERENCE_ALREADY_USED");
+      }
+
+      const receiptNo = await this.nextReceiptNo(tx, actor, current);
+      const now = new Date();
+      const [payment] = await tx
+        .insert(payments)
+        .values({
+          tenantId: actor.tenantId,
+          outletId: current.outletId,
+          salesOrderId: id,
+          entryType: "payment",
+          method: dto.method,
+          status: "paid",
+          currencyCode: current.currencyCode,
+          amountApplied: calculated.amountApplied as any,
+          amountTendered: calculated.amountTendered as any,
+          changeAmount: calculated.changeAmount as any,
+          externalReference,
+          paidAt: now,
+          cashierId: actor.userId,
+          createdBy: actor.userId,
+        })
+        .returning();
+      const [updated] = await tx
+        .update(salesOrders)
+        .set({
+          receiptNo,
+          paymentStatus: "paid",
+          lockVersion: sql`${salesOrders.lockVersion} + 1`,
+          updatedAt: now,
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(salesOrders.id, id),
+            eq(salesOrders.tenantId, actor.tenantId),
+            eq(salesOrders.outletId, current.outletId),
+            eq(salesOrders.paymentStatus, "unpaid"),
+            eq(salesOrders.lockVersion, dto.lockVersion),
+          ),
+        )
+        .returning();
+      if (!updated)
+        throw new ConflictException("STALE_ORDER_VERSION");
+      await tx.insert(auditLogs).values({
+        tenantId: actor.tenantId,
+        outletId: current.outletId,
+        actorUserId: actor.userId,
+        action: "sales_order.payment_recorded",
+        entityType: "sales_order",
+        entityId: id,
+        beforeData: { paymentStatus: current.paymentStatus },
+        afterData: {
+          paymentStatus: "paid",
+          paymentId: payment.id,
+          receiptNo,
+          method: dto.method,
+          amountApplied: calculated.amountApplied,
+          amountTendered: calculated.amountTendered,
+          changeAmount: calculated.changeAmount,
+          lockVersion: updated.lockVersion,
+          cashierId: actor.userId,
+          paidAt: now.toISOString(),
+        },
+      });
+      await this.completeOperation(tx, operation.id, id, payment.id);
+      return { orderId: id };
+    });
+    return this.get(actor, result.orderId);
+  }
+
+  async complete(actor: AuthUser, id: string, dto: PosMutationDto) {
+    const visible = await this.getBase(actor.tenantId, id, this.database.db);
+    if (!visible) throw new NotFoundException("Order POS tidak ditemukan.");
+    await this.assertOutletAccess(actor, visible.outletId);
+    const requestHash = this.requestHash({
+      operation: "complete_order",
+      orderId: id,
+      ...dto,
+    });
+    const result = await this.database.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select id from sales_orders where id = ${id} and tenant_id = ${actor.tenantId} and outlet_id = ${visible.outletId} for update`,
+      );
+      const current = await this.getBase(actor.tenantId, id, tx);
+      if (!current) throw new NotFoundException("Order POS tidak ditemukan.");
+      const operation = await this.acquireOperation(
+        tx,
+        actor,
+        current.outletId,
+        dto.idempotencyKey,
+        "complete_order",
+        requestHash,
+      );
+      if (operation.replay) return { orderId: id };
+      if (current.lockVersion !== dto.lockVersion)
+        throw new ConflictException("STALE_ORDER_VERSION");
+      if (current.paymentStatus !== "paid")
+        throw new ConflictException("ORDER_NOT_PAID");
+      if (["draft", "cancelled", "completed"].includes(current.status))
+        throw new ConflictException("ORDER_NOT_COMPLETABLE");
+      const [payment] = await tx
+        .select({ id: payments.id })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.tenantId, actor.tenantId),
+            eq(payments.salesOrderId, id),
+            eq(payments.entryType, "payment"),
+            eq(payments.status, "paid"),
+          ),
+        )
+        .limit(1);
+      if (!payment) throw new ConflictException("PAID_PAYMENT_NOT_FOUND");
+      if (
+        current.items.some(
+          (item: any) => item.requiresKitchen && item.status !== "ready",
+        )
+      )
+        throw new ConflictException("KITCHEN_ITEMS_NOT_READY");
+      if (
+        current.items.some(
+          (item: any) => !item.requiresKitchen && item.status !== "completed",
+        )
+      )
+        throw new ConflictException("NON_KITCHEN_ITEMS_NOT_COMPLETED");
+
+      const now = new Date();
+      const itemTransitions = current.items
+        .filter((row: any) => row.requiresKitchen)
+        .map((row: any) => ({
+          salesOrderItemId: row.id,
+          fromStatus: "ready",
+          toStatus: "completed",
+        }));
+      for (const item of current.items.filter(
+        (row: any) => row.requiresKitchen,
+      )) {
+        await tx
+          .update(salesOrderItems)
+          .set({
+            status: "completed",
+            completedAt: now,
+            lockVersion: sql`${salesOrderItems.lockVersion} + 1`,
+            updatedAt: now,
+            updatedBy: actor.userId,
+          })
+          .where(
+            and(
+              eq(salesOrderItems.tenantId, actor.tenantId),
+              eq(salesOrderItems.salesOrderId, id),
+              eq(salesOrderItems.id, item.id),
+              eq(salesOrderItems.status, "ready"),
+            ),
+          );
+        await tx.insert(salesOrderItemStatusHistory).values({
+          tenantId: actor.tenantId,
+          outletId: current.outletId,
+          salesOrderId: id,
+          salesOrderItemId: item.id,
+          fromStatus: "ready",
+          toStatus: "completed",
+          changedBy: actor.userId,
+        });
+      }
+      const [updated] = await tx
+        .update(salesOrders)
+        .set({
+          status: "completed",
+          completedAt: now,
+          completedBy: actor.userId,
+          lockVersion: sql`${salesOrders.lockVersion} + 1`,
+          updatedAt: now,
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(salesOrders.id, id),
+            eq(salesOrders.tenantId, actor.tenantId),
+            eq(salesOrders.outletId, current.outletId),
+            eq(salesOrders.paymentStatus, "paid"),
+            eq(salesOrders.status, current.status),
+            eq(salesOrders.lockVersion, dto.lockVersion),
+          ),
+        )
+        .returning();
+      if (!updated) throw new ConflictException("STALE_ORDER_VERSION");
+      await tx.insert(auditLogs).values({
+        tenantId: actor.tenantId,
+        outletId: current.outletId,
+        actorUserId: actor.userId,
+        action: "sales_order.complete",
+        entityType: "sales_order",
+        entityId: id,
+        beforeData: { status: current.status, lockVersion: current.lockVersion },
+        afterData: {
+          status: "completed",
+          lockVersion: updated.lockVersion,
+          itemTransitions,
+          completedAt: now.toISOString(),
+        },
+      });
+      await this.completeOperation(tx, operation.id, id, payment.id);
+      return { orderId: id };
+    });
+    return this.get(actor, result.orderId);
+  }
+
+  async void(actor: AuthUser, id: string, dto: VoidPosOrderDto) {
+    const reason = dto.reason.trim();
+    if (reason.length < 3)
+      throw new BadRequestException(
+        "Alasan void minimal tiga karakter bermakna.",
+      );
+    const refundReference = dto.refundReference?.trim() || null;
+    const visible = await this.getBase(actor.tenantId, id, this.database.db);
+    if (!visible) throw new NotFoundException("Order POS tidak ditemukan.");
+    await this.assertOutletAccess(actor, visible.outletId);
+    const requestHash = this.requestHash({
+      operation: "void_paid_order",
+      orderId: id,
+      ...dto,
+      reason,
+      refundReference,
+    });
+    const result = await this.database.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select id from sales_orders where id = ${id} and tenant_id = ${actor.tenantId} and outlet_id = ${visible.outletId} for update`,
+      );
+      const current = await this.getBase(actor.tenantId, id, tx);
+      if (!current) throw new NotFoundException("Order POS tidak ditemukan.");
+      const operation = await this.acquireOperation(
+        tx,
+        actor,
+        current.outletId,
+        dto.idempotencyKey,
+        "void_paid_order",
+        requestHash,
+      );
+      if (operation.replay) return { orderId: id };
+      if (current.lockVersion !== dto.lockVersion)
+        throw new ConflictException("STALE_ORDER_VERSION");
+      if (current.paymentStatus !== "paid")
+        throw new ConflictException("ORDER_NOT_PAID");
+      if (["draft", "cancelled"].includes(current.status))
+        throw new ConflictException("ORDER_NOT_VOIDABLE");
+      const [original] = await tx
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.tenantId, actor.tenantId),
+            eq(payments.salesOrderId, id),
+            eq(payments.entryType, "payment"),
+            eq(payments.status, "paid"),
+          ),
+        )
+        .limit(1);
+      if (!original) throw new ConflictException("PAID_PAYMENT_NOT_FOUND");
+      await tx.execute(
+        sql`select id from payments where id = ${original.id} and tenant_id = ${actor.tenantId} for update`,
+      );
+      if (original.method !== "cash" && !refundReference)
+        throw new BadRequestException(
+          "Refund reference wajib untuk pembayaran non-tunai.",
+        );
+      if (refundReference) {
+        const [duplicateReference] = await tx
+          .select({ id: payments.id })
+          .from(payments)
+          .where(
+            and(
+              eq(payments.tenantId, actor.tenantId),
+              eq(payments.outletId, current.outletId),
+              eq(payments.externalReference, refundReference),
+            ),
+          )
+          .limit(1);
+        if (duplicateReference)
+          throw new ConflictException("PAYMENT_REFERENCE_ALREADY_USED");
+      }
+
+      const reversal = await this.reverseConsumption(
+        tx,
+        actor,
+        current,
+        reason,
+      );
+      const now = new Date();
+      const [refund] = await tx
+        .insert(payments)
+        .values({
+          tenantId: actor.tenantId,
+          outletId: current.outletId,
+          salesOrderId: id,
+          originalPaymentId: original.id,
+          entryType: "manual_refund",
+          method: original.method,
+          status: "voided",
+          currencyCode: original.currencyCode,
+          amountApplied: original.amountApplied,
+          amountTendered: original.amountApplied,
+          changeAmount: 0,
+          externalReference: refundReference,
+          reason,
+          voidedAt: now,
+          cashierId: actor.userId,
+          createdBy: actor.userId,
+        })
+        .returning();
+      await tx
+        .update(payments)
+        .set({ status: "voided", voidedAt: now, reason })
+        .where(
+          and(
+            eq(payments.id, original.id),
+            eq(payments.tenantId, actor.tenantId),
+            eq(payments.status, "paid"),
+          ),
+        );
+
+      if (current.status !== "completed") {
+        for (const item of current.items) {
+          await tx
+            .update(salesOrderItems)
+            .set({
+              status: "cancelled",
+              cancelledAt: now,
+              cancelledBy: actor.userId,
+              cancellationReason: reason,
+              lockVersion: sql`${salesOrderItems.lockVersion} + 1`,
+              updatedAt: now,
+              updatedBy: actor.userId,
+            })
+            .where(
+              and(
+                eq(salesOrderItems.tenantId, actor.tenantId),
+                eq(salesOrderItems.salesOrderId, id),
+                eq(salesOrderItems.id, item.id),
+              ),
+            );
+          await tx.insert(salesOrderItemStatusHistory).values({
+            tenantId: actor.tenantId,
+            outletId: current.outletId,
+            salesOrderId: id,
+            salesOrderItemId: item.id,
+            fromStatus: item.status,
+            toStatus: "cancelled",
+            changedBy: actor.userId,
+            reason,
+          });
+        }
+      }
+      const nextStatus =
+        current.status === "completed" ? "completed" : "cancelled";
+      const [updated] = await tx
+        .update(salesOrders)
+        .set({
+          status: nextStatus,
+          paymentStatus: "voided",
+          cancelledAt: nextStatus === "cancelled" ? now : null,
+          cancelledBy: nextStatus === "cancelled" ? actor.userId : null,
+          cancellationReason: nextStatus === "cancelled" ? reason : null,
+          lockVersion: sql`${salesOrders.lockVersion} + 1`,
+          updatedAt: now,
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(salesOrders.id, id),
+            eq(salesOrders.tenantId, actor.tenantId),
+            eq(salesOrders.outletId, current.outletId),
+            eq(salesOrders.paymentStatus, "paid"),
+            eq(salesOrders.status, current.status),
+            eq(salesOrders.lockVersion, dto.lockVersion),
+          ),
+        )
+        .returning();
+      if (!updated) throw new ConflictException("STALE_ORDER_VERSION");
+      await tx.insert(auditLogs).values({
+        tenantId: actor.tenantId,
+        outletId: current.outletId,
+        actorUserId: actor.userId,
+        action: "sales_order.payment_voided",
+        entityType: "sales_order",
+        entityId: id,
+        beforeData: {
+          status: current.status,
+          paymentStatus: current.paymentStatus,
+          paymentId: original.id,
+        },
+        afterData: {
+          status: nextStatus,
+          paymentStatus: "voided",
+          refundPaymentId: refund.id,
+          refundReference,
+          refundAmount: this.moneyString(original.amountApplied),
+          lockVersion: updated.lockVersion,
+          voidedAt: now.toISOString(),
+          postCompletionVoid: current.status === "completed",
+          ...reversal,
+        },
+        reason,
+      });
+      await this.completeOperation(tx, operation.id, id, refund.id);
       return { orderId: id };
     });
     return this.get(actor, result.orderId);
@@ -1237,6 +1779,40 @@ export class PosService {
     return movement;
   }
 
+  private async nextReceiptNo(
+    tx: DbExecutor,
+    actor: AuthUser,
+    order: any,
+  ) {
+    const [sequence] = await tx
+      .insert(documentSequences)
+      .values({
+        tenantId: actor.tenantId,
+        outletId: order.outletId,
+        documentType: "pos_receipt",
+        businessDate: order.businessDate,
+        lastNumber: 1,
+        prefixPattern: "TRX-{YYMMDD}-{####}",
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      })
+      .onConflictDoUpdate({
+        target: [
+          documentSequences.tenantId,
+          documentSequences.outletId,
+          documentSequences.documentType,
+          documentSequences.businessDate,
+        ],
+        set: {
+          lastNumber: sql`${documentSequences.lastNumber} + 1`,
+          updatedAt: new Date(),
+          updatedBy: actor.userId,
+        },
+      })
+      .returning({ lastNumber: documentSequences.lastNumber });
+    return `TRX-${order.businessDate.replaceAll("-", "").slice(2)}-${String(sequence.lastNumber).padStart(4, "0")}`;
+  }
+
   private async reverseConsumption(
     tx: DbExecutor,
     actor: AuthUser,
@@ -1313,6 +1889,8 @@ export class PosService {
       "reversal",
       { reversalOfId: original.id, reason },
     );
+    let restoredQuantityMilli = 0n;
+    let restoredValueMinor = 0n;
     for (const line of originalLines) {
       if (!line.stockBatchId)
         throw new ConflictException(
@@ -1324,6 +1902,8 @@ export class PosService {
         throw new ConflictException(
           "REVERSAL_INVALID: Nilai original consumption tidak valid.",
         );
+      restoredQuantityMilli += restoreMilli;
+      restoredValueMinor += restoreValueMinor;
       await tx
         .update(stockBatches)
         .set({
@@ -1387,6 +1967,8 @@ export class PosService {
     return {
       originalMovementId: original.id,
       reversalMovementId: reversal.id,
+      restoredQuantity: formatFixed(restoredQuantityMilli, 3),
+      restoredValue: formatMinor(restoredValueMinor),
     };
   }
 
@@ -1460,14 +2042,16 @@ export class PosService {
     tx: DbExecutor,
     operationId: string,
     orderId: string,
+    paymentId?: string,
   ) {
     await tx
       .update(posOperationRequests)
       .set({
         status: "completed",
         salesOrderId: orderId,
+        paymentId,
         responseStatus: 200,
-        responseBody: { orderId },
+        responseBody: { orderId, ...(paymentId ? { paymentId } : {}) },
         completedAt: new Date(),
       })
       .where(eq(posOperationRequests.id, operationId));

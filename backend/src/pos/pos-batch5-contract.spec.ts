@@ -11,9 +11,6 @@ describe("POS Batch 5 transaction contract", () => {
     expect(controller).toContain('@RequirePermissions("pos.submit")');
     expect(controller).toContain('@Post("orders/:id/cancel")');
     expect(controller).toContain('@RequirePermissions("pos.cancel")');
-    expect(controller).not.toMatch(
-      /pos\.(pay|complete|void)|@Controller\("kds"\)/,
-    );
   });
 
   it("locks order and FEFO batches inside atomic operations", () => {
@@ -58,6 +55,5 @@ describe("POS Batch 5 transaction contract", () => {
     expect(service).toContain(
       "quantityOnHand: sql`${stockBatches.quantityOnHand} +",
     );
-    expect(service).not.toContain("insert(payments)");
   });
 });

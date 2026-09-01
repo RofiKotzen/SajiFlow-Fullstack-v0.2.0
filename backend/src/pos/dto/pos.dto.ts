@@ -135,5 +135,9 @@ export class PosReasonMutationDto extends PosMutationDto {
 }
 
 export class VoidPosOrderDto extends PosReasonMutationDto {
-  @ApiProperty() @IsString() @Length(1, 150) refundReference!: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(1, 150)
+  refundReference?: string | null;
 }

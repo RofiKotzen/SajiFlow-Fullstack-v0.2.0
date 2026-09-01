@@ -20,7 +20,9 @@ import {
   CreatePosOrderDto,
   PosMutationDto,
   PosReasonMutationDto,
+  RecordPosPaymentDto,
   UpdatePosOrderDto,
+  VoidPosOrderDto,
 } from "./dto/pos.dto";
 import { PosService } from "./pos.service";
 
@@ -72,6 +74,36 @@ export class PosController {
     @Body() dto: PosMutationDto,
   ) {
     return this.pos.submit(actor, id, dto);
+  }
+
+  @Post("orders/:id/payments")
+  @RequirePermissions("pos.pay")
+  pay(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: RecordPosPaymentDto,
+  ) {
+    return this.pos.pay(actor, id, dto);
+  }
+
+  @Post("orders/:id/complete")
+  @RequirePermissions("pos.complete")
+  complete(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: PosMutationDto,
+  ) {
+    return this.pos.complete(actor, id, dto);
+  }
+
+  @Post("orders/:id/void")
+  @RequirePermissions("pos.void")
+  void(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: VoidPosOrderDto,
+  ) {
+    return this.pos.void(actor, id, dto);
   }
 
   @Post("orders/:id/cancel")

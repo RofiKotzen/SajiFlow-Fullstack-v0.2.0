@@ -121,8 +121,6 @@ describe("POS DTO validation", () => {
       lockVersion: 1,
       reason: "Salah transaksi",
     });
-    expect((await validate(voidDto)).map((error) => error.property)).toContain(
-      "refundReference",
-    );
+    expect(await validate(voidDto)).toHaveLength(0);
   });
 });
