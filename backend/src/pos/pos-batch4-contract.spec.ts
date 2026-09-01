@@ -17,7 +17,7 @@ describe("POS Batch 4 HTTP and persistence contract", () => {
     ).toHaveLength(3);
     expect(controller).toContain('@RequirePermissions("pos.create")');
     expect(controller).toContain('@RequirePermissions("pos.update")');
-    expect(controller).not.toMatch(/submit|payment|complete|cancel|void|kds/i);
+    expect(controller).not.toMatch(/orders\/:id\/(payment|complete|void)|kds/i);
   });
 
   it("binds all reads and mutations to tenant and outlet scope", () => {
@@ -38,7 +38,9 @@ describe("POS Batch 4 HTTP and persistence contract", () => {
     expect(service).toContain(
       "lockVersion: sql`${salesOrders.lockVersion} + 1`",
     );
-    expect(service.match(/\.transaction\(async \(tx\)/g)).toHaveLength(2);
+    expect(
+      service.match(/\.transaction\(async \(tx\)/g)?.length,
+    ).toBeGreaterThanOrEqual(2);
     expect(service).toContain('action: "sales_order.create"');
     expect(service).toContain('action: "sales_order.draft_update"');
   });
@@ -48,7 +50,6 @@ describe("POS Batch 4 HTTP and persistence contract", () => {
     expect(service).toContain("multiplyMoney(price, item.quantity)");
     expect(service).toContain("recipeVersionNo");
     expect(service).not.toContain("insert(payments)");
-    expect(service).not.toContain("insert(salesItemConsumptions)");
-    expect(service).not.toContain("insert(salesOrderItemStatusHistory)");
+    expect(service).toContain('status: "draft" as const');
   });
 });

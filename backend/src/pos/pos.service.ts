@@ -25,6 +25,7 @@ import { DatabaseService } from "../database/database.service";
 import {
   auditLogs,
   documentSequences,
+  ingredients,
   menuCategories,
   menus,
   menuVariantOutletSettings,
@@ -33,18 +34,25 @@ import {
   payments,
   posOperationRequests,
   recipeHeaders,
+  recipeItems,
   recipes,
   salesItemConsumptions,
   salesOrderItemStatusHistory,
   salesOrderItems,
   salesOrders,
+  stockBatches,
+  stockMovementLines,
+  stockMovements,
   tenants,
+  units,
   users,
 } from "../database/schema";
 import { ListPosOrdersQueryDto } from "./dto/list-pos-orders-query.dto";
 import {
   CreatePosOrderDto,
+  PosMutationDto,
   PosOrderItemDto,
+  PosReasonMutationDto,
   UpdatePosOrderDto,
 } from "./dto/pos.dto";
 import {
@@ -54,6 +62,14 @@ import {
   parseDecimalToMinor,
   type OrderType,
 } from "./pos-domain";
+import {
+  allocateFefo,
+  formatFixed,
+  inventoryValueMinor,
+  parseFixed,
+  recipeRequirement,
+  requirementToStockMilli,
+} from "./pos-inventory-domain";
 
 type DbExecutor = any;
 
@@ -64,6 +80,18 @@ interface OutletContext {
   timezone: string;
   businessDayCutoff: string;
   currencyCode: string;
+}
+
+interface ConsumptionPlan {
+  salesOrderItemId: string;
+  recipeVersionId: string;
+  recipeItemId: string;
+  ingredientId: string;
+  ingredientSku: string;
+  ingredientName: string;
+  baseUnitCode: string;
+  isOptional: boolean;
+  requiredMicro: bigint;
 }
 
 @Injectable()
@@ -499,6 +527,959 @@ export class PosService {
     return this.get(actor, id);
   }
 
+  async submit(actor: AuthUser, id: string, dto: PosMutationDto) {
+    const visible = await this.getBase(actor.tenantId, id, this.database.db);
+    if (!visible) throw new NotFoundException("Order POS tidak ditemukan.");
+    await this.assertOutletAccess(actor, visible.outletId);
+    const requestHash = this.requestHash({
+      operation: "submit_order",
+      orderId: id,
+      ...dto,
+    });
+
+    const result = await this.database.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select id from sales_orders where id = ${id} and tenant_id = ${actor.tenantId} and outlet_id = ${visible.outletId} for update`,
+      );
+      const current = await this.getBase(actor.tenantId, id, tx);
+      if (!current) throw new NotFoundException("Order POS tidak ditemukan.");
+      const operation = await this.acquireOperation(
+        tx,
+        actor,
+        current.outletId,
+        dto.idempotencyKey,
+        "submit_order",
+        requestHash,
+      );
+      if (operation.replay) return { orderId: id };
+      if (current.status !== "draft")
+        throw new ConflictException("ORDER_NOT_DRAFT: Order sudah diproses.");
+      if (current.paymentStatus !== "unpaid")
+        throw new ConflictException(
+          "ORDER_ALREADY_SUBMITTED: Status pembayaran order tidak valid.",
+        );
+      if (current.lockVersion !== dto.lockVersion)
+        throw new ConflictException(
+          "STALE_ORDER_VERSION: Muat ulang order sebelum submit.",
+        );
+      if (!current.items.length)
+        throw new ConflictException("ORDER_EMPTY: Order tidak memiliki item.");
+      const outlet = await this.outletContext(
+        actor.tenantId,
+        current.outletId,
+        tx,
+      );
+      if (!outlet) throw new ConflictException("OUTLET_NOT_ACTIVE");
+
+      const plans = await this.submitPlans(actor, current, tx);
+      const movement = await this.createStockMovement(
+        tx,
+        actor,
+        current,
+        "sale_consumption",
+      );
+      const allocations = await this.consumePlans(
+        tx,
+        actor,
+        current,
+        movement.id,
+        plans,
+      );
+      const changedAt = new Date();
+      for (const item of current.items) {
+        const nextStatus = item.requiresKitchen ? "queued" : "completed";
+        await tx
+          .update(salesOrderItems)
+          .set({
+            status: nextStatus,
+            queuedAt: item.requiresKitchen ? changedAt : null,
+            completedAt: item.requiresKitchen ? null : changedAt,
+            lockVersion: sql`${salesOrderItems.lockVersion} + 1`,
+            updatedAt: changedAt,
+            updatedBy: actor.userId,
+          })
+          .where(
+            and(
+              eq(salesOrderItems.id, item.id),
+              eq(salesOrderItems.tenantId, actor.tenantId),
+              eq(salesOrderItems.salesOrderId, id),
+              eq(salesOrderItems.status, "draft"),
+            ),
+          );
+        await tx.insert(salesOrderItemStatusHistory).values({
+          tenantId: actor.tenantId,
+          outletId: current.outletId,
+          salesOrderId: id,
+          salesOrderItemId: item.id,
+          fromStatus: "draft",
+          toStatus: nextStatus,
+          changedBy: actor.userId,
+        });
+      }
+      const nextStatus = current.items.some((item: any) => item.requiresKitchen)
+        ? "submitted"
+        : "ready";
+      const [updated] = await tx
+        .update(salesOrders)
+        .set({
+          status: nextStatus,
+          submittedAt: changedAt,
+          submittedBy: actor.userId,
+          lockVersion: sql`${salesOrders.lockVersion} + 1`,
+          updatedAt: changedAt,
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(salesOrders.id, id),
+            eq(salesOrders.tenantId, actor.tenantId),
+            eq(salesOrders.outletId, current.outletId),
+            eq(salesOrders.status, "draft"),
+            eq(salesOrders.paymentStatus, "unpaid"),
+            eq(salesOrders.lockVersion, dto.lockVersion),
+          ),
+        )
+        .returning();
+      if (!updated)
+        throw new ConflictException(
+          "STALE_ORDER_VERSION: Order berubah saat submit.",
+        );
+      await tx.insert(auditLogs).values({
+        tenantId: actor.tenantId,
+        outletId: current.outletId,
+        actorUserId: actor.userId,
+        action: "sales_order.submit",
+        entityType: "sales_order",
+        entityId: id,
+        beforeData: {
+          status: current.status,
+          lockVersion: current.lockVersion,
+        },
+        afterData: {
+          status: nextStatus,
+          lockVersion: updated.lockVersion,
+          movementId: movement.id,
+          recipes: plans.map((plan) => ({
+            salesOrderItemId: plan.salesOrderItemId,
+            recipeVersionId: plan.recipeVersionId,
+          })),
+          allocations,
+        },
+      });
+      await this.completeOperation(tx, operation.id, id);
+      return { orderId: id };
+    });
+    return this.get(actor, result.orderId);
+  }
+
+  async cancel(actor: AuthUser, id: string, dto: PosReasonMutationDto) {
+    if (dto.reason.trim().length < 3)
+      throw new BadRequestException(
+        "Alasan pembatalan minimal tiga karakter bermakna.",
+      );
+    const visible = await this.getBase(actor.tenantId, id, this.database.db);
+    if (!visible) throw new NotFoundException("Order POS tidak ditemukan.");
+    await this.assertOutletAccess(actor, visible.outletId);
+    const requestHash = this.requestHash({
+      operation: "cancel_order",
+      orderId: id,
+      ...dto,
+      reason: dto.reason.trim(),
+    });
+
+    const result = await this.database.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select id from sales_orders where id = ${id} and tenant_id = ${actor.tenantId} and outlet_id = ${visible.outletId} for update`,
+      );
+      const current = await this.getBase(actor.tenantId, id, tx);
+      if (!current) throw new NotFoundException("Order POS tidak ditemukan.");
+      const operation = await this.acquireOperation(
+        tx,
+        actor,
+        current.outletId,
+        dto.idempotencyKey,
+        "cancel_order",
+        requestHash,
+      );
+      if (operation.replay) return { orderId: id };
+      if (current.lockVersion !== dto.lockVersion)
+        throw new ConflictException(
+          "STALE_ORDER_VERSION: Muat ulang order sebelum cancel.",
+        );
+      if (current.paymentStatus !== "unpaid")
+        throw new ConflictException(
+          "PAID_ORDER_REQUIRES_VOID: Order berbayar harus melalui void.",
+        );
+      if (current.status === "cancelled")
+        throw new ConflictException("ORDER_ALREADY_CANCELLED");
+      if (current.status === "completed")
+        throw new ConflictException(
+          "ORDER_TERMINAL: Order completed tidak dapat dibatalkan.",
+        );
+
+      let originalMovementId: string | null = null;
+      let reversalMovementId: string | null = null;
+      if (current.status !== "draft") {
+        const reversal = await this.reverseConsumption(
+          tx,
+          actor,
+          current,
+          dto.reason.trim(),
+        );
+        originalMovementId = reversal.originalMovementId;
+        reversalMovementId = reversal.reversalMovementId;
+      }
+
+      const changedAt = new Date();
+      const itemChanges: Array<{ id: string; from: string }> = [];
+      for (const item of current.items) {
+        itemChanges.push({ id: item.id, from: item.status });
+        await tx
+          .update(salesOrderItems)
+          .set({
+            status: "cancelled",
+            cancelledAt: changedAt,
+            cancelledBy: actor.userId,
+            cancellationReason: dto.reason.trim(),
+            lockVersion: sql`${salesOrderItems.lockVersion} + 1`,
+            updatedAt: changedAt,
+            updatedBy: actor.userId,
+          })
+          .where(
+            and(
+              eq(salesOrderItems.id, item.id),
+              eq(salesOrderItems.tenantId, actor.tenantId),
+              eq(salesOrderItems.salesOrderId, id),
+            ),
+          );
+        await tx.insert(salesOrderItemStatusHistory).values({
+          tenantId: actor.tenantId,
+          outletId: current.outletId,
+          salesOrderId: id,
+          salesOrderItemId: item.id,
+          fromStatus: item.status,
+          toStatus: "cancelled",
+          changedBy: actor.userId,
+          reason: dto.reason.trim(),
+        });
+      }
+      const [updated] = await tx
+        .update(salesOrders)
+        .set({
+          status: "cancelled",
+          cancelledAt: changedAt,
+          cancelledBy: actor.userId,
+          cancellationReason: dto.reason.trim(),
+          lockVersion: sql`${salesOrders.lockVersion} + 1`,
+          updatedAt: changedAt,
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(salesOrders.id, id),
+            eq(salesOrders.tenantId, actor.tenantId),
+            eq(salesOrders.outletId, current.outletId),
+            eq(salesOrders.paymentStatus, "unpaid"),
+            eq(salesOrders.status, current.status),
+            eq(salesOrders.lockVersion, dto.lockVersion),
+          ),
+        )
+        .returning();
+      if (!updated)
+        throw new ConflictException(
+          "STALE_ORDER_VERSION: Order berubah saat cancel.",
+        );
+      await tx.insert(auditLogs).values({
+        tenantId: actor.tenantId,
+        outletId: current.outletId,
+        actorUserId: actor.userId,
+        action: "sales_order.cancel",
+        entityType: "sales_order",
+        entityId: id,
+        beforeData: {
+          status: current.status,
+          lockVersion: current.lockVersion,
+        },
+        afterData: {
+          status: "cancelled",
+          lockVersion: updated.lockVersion,
+          originalMovementId,
+          reversalMovementId,
+          itemChanges,
+        },
+        reason: dto.reason.trim(),
+      });
+      await this.completeOperation(tx, operation.id, id);
+      return { orderId: id };
+    });
+    return this.get(actor, result.orderId);
+  }
+
+  private async submitPlans(actor: AuthUser, order: any, tx: DbExecutor) {
+    const variantIds = order.items.map((item: any) => item.menuVariantId);
+    const currentMasters = await this.lookupRows(
+      actor.tenantId,
+      order.outletId,
+      tx,
+      variantIds,
+    );
+    if (currentMasters.length !== variantIds.length)
+      throw new ConflictException(
+        "MASTER_NOT_AVAILABLE: Menu atau variant tidak lagi tersedia.",
+      );
+    const masterMap = new Map(
+      currentMasters.map((row: any) => [row.variantId, row]),
+    );
+    for (const item of order.items) {
+      const master: any = masterMap.get(item.menuVariantId);
+      const effectivePrice = master.priceOverride ?? master.basePrice;
+      if (
+        effectivePrice === null ||
+        parseDecimalToMinor(effectivePrice) !==
+          parseDecimalToMinor(item.unitPrice)
+      )
+        throw new ConflictException(
+          `PRICE_CHANGED: Harga ${item.variantNameSnapshot} berubah; perbarui draft.`,
+        );
+      const currentPriceVersion =
+        master.settingUpdatedAt &&
+        master.settingUpdatedAt > master.variantUpdatedAt
+          ? master.settingUpdatedAt
+          : master.variantUpdatedAt;
+      if (currentPriceVersion.getTime() !== item.priceSourceVersionAt.getTime())
+        throw new ConflictException(
+          `PRICE_CHANGED: Sumber harga ${item.variantNameSnapshot} berubah; perbarui draft.`,
+        );
+      if (master.currencyCode !== item.currencyCode)
+        throw new ConflictException(
+          `CURRENCY_MISMATCH: Currency ${item.variantNameSnapshot} berubah.`,
+        );
+      if (
+        master.requiresRecipe !== item.requiresRecipe ||
+        master.requiresKitchen !== item.requiresKitchen
+      )
+        throw new ConflictException(
+          `MASTER_CHANGED: Konfigurasi ${item.variantNameSnapshot} berubah.`,
+        );
+    }
+
+    const recipeOrderItems = order.items.filter(
+      (item: any) => item.requiresRecipe,
+    );
+    if (!recipeOrderItems.length) return [] as ConsumptionPlan[];
+    const recipeVersionIds = recipeOrderItems.map(
+      (item: any) => item.recipeVersionId,
+    );
+    if (recipeVersionIds.some((id: string | null) => !id))
+      throw new ConflictException(
+        "RECIPE_NOT_READY: Snapshot Recipe tidak lengkap.",
+      );
+    const now = new Date();
+    const recipeRows = await tx
+      .select({
+        id: recipes.id,
+        recipeHeaderId: recipes.recipeHeaderId,
+        menuVariantId: recipes.menuVariantId,
+        versionNo: recipes.versionNo,
+        servingCount: recipes.servingCount,
+        status: recipes.status,
+        effectiveFrom: recipes.effectiveFrom,
+        effectiveUntil: recipes.effectiveUntil,
+        approvedOutletId: recipes.approvedOutletId,
+      })
+      .from(recipes)
+      .where(
+        and(
+          eq(recipes.tenantId, actor.tenantId),
+          inArray(recipes.id, recipeVersionIds),
+        ),
+      );
+    const recipeMap = new Map(recipeRows.map((row: any) => [row.id, row]));
+    for (const item of recipeOrderItems) {
+      const recipe: any = recipeMap.get(item.recipeVersionId);
+      if (
+        !recipe ||
+        recipe.recipeHeaderId !== item.recipeHeaderId ||
+        recipe.menuVariantId !== item.menuVariantId ||
+        recipe.versionNo !== item.recipeVersionNo ||
+        recipe.status !== "approved" ||
+        recipe.effectiveFrom > now ||
+        (recipe.effectiveUntil && recipe.effectiveUntil <= now) ||
+        (recipe.approvedOutletId &&
+          recipe.approvedOutletId !== order.outletId) ||
+        parseFixed(recipe.servingCount, 3) <= 0n
+      )
+        throw new ConflictException(
+          `RECIPE_NOT_READY: Snapshot Recipe ${item.variantNameSnapshot} tidak lagi sah.`,
+        );
+    }
+
+    const componentRows = await tx
+      .select({
+        id: recipeItems.id,
+        recipeVersionId: recipeItems.recipeId,
+        ingredientId: recipeItems.ingredientId,
+        baseQuantity: recipeItems.baseQuantity,
+        isOptional: recipeItems.isOptional,
+        ingredientSku: recipeItems.ingredientSkuSnapshot,
+        ingredientName: recipeItems.ingredientNameSnapshot,
+        baseUnitCode: recipeItems.baseUnitCodeSnapshot,
+        currentIngredientSku: ingredients.sku,
+        currentIngredientName: ingredients.name,
+        currentBaseUnitCode: units.code,
+      })
+      .from(recipeItems)
+      .innerJoin(
+        ingredients,
+        and(
+          eq(ingredients.id, recipeItems.ingredientId),
+          eq(ingredients.tenantId, actor.tenantId),
+        ),
+      )
+      .innerJoin(units, eq(units.id, ingredients.baseUnitId))
+      .where(
+        and(
+          eq(recipeItems.tenantId, actor.tenantId),
+          inArray(recipeItems.recipeId, recipeVersionIds),
+        ),
+      )
+      .orderBy(asc(recipeItems.recipeId), asc(recipeItems.lineNo));
+    const components = new Map<string, any[]>();
+    for (const row of componentRows) {
+      const list = components.get(row.recipeVersionId) ?? [];
+      list.push(row);
+      components.set(row.recipeVersionId, list);
+    }
+
+    const plans: ConsumptionPlan[] = [];
+    for (const item of recipeOrderItems) {
+      const recipe: any = recipeMap.get(item.recipeVersionId)!;
+      const rows = components.get(item.recipeVersionId) ?? [];
+      if (!rows.length)
+        throw new ConflictException(
+          `RECIPE_NOT_READY: Recipe ${item.variantNameSnapshot} tidak memiliki item.`,
+        );
+      for (const component of rows) {
+        if (component.baseQuantity === null)
+          throw new ConflictException(
+            `RECIPE_NOT_READY: Konversi bahan Recipe ${item.variantNameSnapshot} belum lengkap.`,
+          );
+        let requiredMicro: bigint;
+        try {
+          requiredMicro = recipeRequirement(
+            component.baseQuantity,
+            recipe.servingCount,
+            item.quantity,
+          );
+        } catch {
+          throw new ConflictException(
+            `RECIPE_NOT_READY: Quantity Recipe ${item.variantNameSnapshot} tidak valid.`,
+          );
+        }
+        plans.push({
+          salesOrderItemId: item.id,
+          recipeVersionId: item.recipeVersionId,
+          recipeItemId: component.id,
+          ingredientId: component.ingredientId,
+          ingredientSku:
+            component.ingredientSku ?? component.currentIngredientSku,
+          ingredientName:
+            component.ingredientName ?? component.currentIngredientName,
+          baseUnitCode: component.baseUnitCode ?? component.currentBaseUnitCode,
+          isOptional: component.isOptional,
+          requiredMicro,
+        });
+      }
+    }
+    return plans;
+  }
+
+  private async consumePlans(
+    tx: DbExecutor,
+    actor: AuthUser,
+    order: any,
+    movementId: string,
+    plans: ConsumptionPlan[],
+  ) {
+    const requiredPlans = plans.filter((plan) => !plan.isOptional);
+    const ingredientIds = [
+      ...new Set(requiredPlans.map((plan) => plan.ingredientId)),
+    ].sort();
+    const batchRows: any[] = ingredientIds.length
+      ? await tx.execute(
+          sql`select sb.id, sb.ingredient_id, sb.storage_location_id, sb.expiry_date::text, sb.received_date::text, sb.unit_cost::text, sb.quantity_on_hand::text
+              from stock_batches sb
+              inner join storage_locations sl on sl.id = sb.storage_location_id
+              where sb.tenant_id = ${actor.tenantId}
+                and sb.outlet_id = ${order.outletId}
+                and sb.ingredient_id in (${sql.join(
+                  ingredientIds.map((ingredientId) => sql`${ingredientId}`),
+                  sql`, `,
+                )})
+                and sb.quantity_on_hand > 0
+                and sl.tenant_id = ${actor.tenantId}
+                and sl.outlet_id = ${order.outletId}
+                and sl.is_active = true and sl.deleted_at is null
+              order by sb.ingredient_id, sb.expiry_date asc nulls last, sb.received_date, sb.id
+              for update of sb`,
+        )
+      : [];
+    const batchesByIngredient = new Map<string, any[]>();
+    for (const row of batchRows) {
+      const normalized = {
+        id: row.id,
+        ingredientId: row.ingredient_id,
+        storageLocationId: row.storage_location_id,
+        expiryDate: row.expiry_date,
+        receivedDate: row.received_date,
+        unitCost: row.unit_cost,
+        quantityOnHand: row.quantity_on_hand,
+      };
+      const list = batchesByIngredient.get(normalized.ingredientId) ?? [];
+      list.push(normalized);
+      batchesByIngredient.set(normalized.ingredientId, list);
+    }
+
+    const allocationAudit: any[] = [];
+    for (const plan of plans) {
+      if (plan.isOptional) {
+        await tx.insert(salesItemConsumptions).values({
+          tenantId: actor.tenantId,
+          outletId: order.outletId,
+          salesOrderId: order.id,
+          salesOrderItemId: plan.salesOrderItemId,
+          recipeVersionId: plan.recipeVersionId,
+          recipeItemId: plan.recipeItemId,
+          ingredientId: plan.ingredientId,
+          ingredientSkuSnapshot: plan.ingredientSku,
+          ingredientNameSnapshot: plan.ingredientName,
+          baseUnitCodeSnapshot: plan.baseUnitCode,
+          isOptional: true,
+          requiredBaseQuantity: formatFixed(plan.requiredMicro, 6) as any,
+          consumedBaseQuantity: 0,
+          status: "skipped_optional",
+          skippedReason: "OPTIONAL_ITEM_PHASE1",
+          createdBy: actor.userId,
+          updatedBy: actor.userId,
+        });
+        continue;
+      }
+      const requiredMilli = requirementToStockMilli(plan.requiredMicro);
+      let allocations: Array<{ batch: any; quantityMilli: bigint }>;
+      try {
+        allocations = allocateFefo(
+          requiredMilli,
+          batchesByIngredient.get(plan.ingredientId) ?? [],
+        );
+      } catch {
+        throw new ConflictException(
+          `INSUFFICIENT_STOCK: Stok ${plan.ingredientName} tidak mencukupi.`,
+        );
+      }
+      let requiredRemaining = plan.requiredMicro;
+      for (const allocation of allocations) {
+        const consumedMicro = allocation.quantityMilli * 1000n;
+        const requiredForRow =
+          requiredRemaining < consumedMicro ? requiredRemaining : consumedMicro;
+        requiredRemaining -= requiredForRow;
+        const nextMilli =
+          parseFixed(allocation.batch.quantityOnHand, 3) -
+          allocation.quantityMilli;
+        const [updatedBatch] = await tx
+          .update(stockBatches)
+          .set({
+            quantityOnHand: formatFixed(nextMilli, 3) as any,
+            updatedAt: new Date(),
+            updatedBy: actor.userId,
+          })
+          .where(
+            and(
+              eq(stockBatches.id, allocation.batch.id),
+              eq(stockBatches.tenantId, actor.tenantId),
+              eq(stockBatches.outletId, order.outletId),
+              gte(
+                stockBatches.quantityOnHand,
+                formatFixed(allocation.quantityMilli, 3) as any,
+              ),
+            ),
+          )
+          .returning({ id: stockBatches.id });
+        if (!updatedBatch)
+          throw new ConflictException(
+            `INSUFFICIENT_STOCK: Stok ${plan.ingredientName} berubah saat submit.`,
+          );
+        allocation.batch.quantityOnHand = formatFixed(nextMilli, 3);
+        const valueMinor = inventoryValueMinor(
+          allocation.quantityMilli,
+          allocation.batch.unitCost,
+        );
+        const [locationBalance] = await tx
+          .select({
+            value: sql<number>`coalesce(sum(${stockBatches.quantityOnHand}), 0)`,
+          })
+          .from(stockBatches)
+          .where(
+            and(
+              eq(stockBatches.tenantId, actor.tenantId),
+              eq(stockBatches.outletId, order.outletId),
+              eq(stockBatches.ingredientId, plan.ingredientId),
+              eq(
+                stockBatches.storageLocationId,
+                allocation.batch.storageLocationId,
+              ),
+            ),
+          );
+        const [line] = await tx
+          .insert(stockMovementLines)
+          .values({
+            tenantId: actor.tenantId,
+            stockMovementId: movementId,
+            ingredientId: plan.ingredientId,
+            storageLocationId: allocation.batch.storageLocationId,
+            stockBatchId: allocation.batch.id,
+            quantityDelta: formatFixed(-allocation.quantityMilli, 3) as any,
+            unitCost: allocation.batch.unitCost,
+            valueDelta: formatMinor(-valueMinor) as any,
+            balanceAfter: Number(locationBalance.value),
+            createdBy: actor.userId,
+            updatedBy: actor.userId,
+          })
+          .returning({ id: stockMovementLines.id });
+        await tx.insert(salesItemConsumptions).values({
+          tenantId: actor.tenantId,
+          outletId: order.outletId,
+          salesOrderId: order.id,
+          salesOrderItemId: plan.salesOrderItemId,
+          recipeVersionId: plan.recipeVersionId,
+          recipeItemId: plan.recipeItemId,
+          ingredientId: plan.ingredientId,
+          ingredientSkuSnapshot: plan.ingredientSku,
+          ingredientNameSnapshot: plan.ingredientName,
+          baseUnitCodeSnapshot: plan.baseUnitCode,
+          isOptional: false,
+          requiredBaseQuantity: formatFixed(requiredForRow, 6) as any,
+          consumedBaseQuantity: formatFixed(consumedMicro, 6) as any,
+          status: "posted",
+          stockBatchId: allocation.batch.id,
+          stockMovementId: movementId,
+          stockMovementLineId: line.id,
+          unitCostSnapshot: allocation.batch.unitCost,
+          valueSnapshot: formatMinor(valueMinor) as any,
+          createdBy: actor.userId,
+          updatedBy: actor.userId,
+        });
+        allocationAudit.push({
+          ingredientId: plan.ingredientId,
+          salesOrderItemId: plan.salesOrderItemId,
+          batchId: allocation.batch.id,
+          quantity: formatFixed(allocation.quantityMilli, 3),
+          value: formatMinor(valueMinor),
+        });
+      }
+    }
+    return allocationAudit;
+  }
+
+  private async createStockMovement(
+    tx: DbExecutor,
+    actor: AuthUser,
+    order: any,
+    movementType: "sale_consumption" | "reversal",
+    options?: { reversalOfId?: string; reason?: string },
+  ) {
+    const businessDate = order.businessDate;
+    const [sequence] = await tx
+      .insert(documentSequences)
+      .values({
+        tenantId: actor.tenantId,
+        outletId: order.outletId,
+        documentType: "stock_movement",
+        businessDate,
+        lastNumber: 1,
+        prefixPattern: "SM-{YYMMDD}-{####}",
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      })
+      .onConflictDoUpdate({
+        target: [
+          documentSequences.tenantId,
+          documentSequences.outletId,
+          documentSequences.documentType,
+          documentSequences.businessDate,
+        ],
+        set: {
+          lastNumber: sql`${documentSequences.lastNumber} + 1`,
+          updatedAt: new Date(),
+          updatedBy: actor.userId,
+        },
+      })
+      .returning({ lastNumber: documentSequences.lastNumber });
+    const movementNo = `SM-${businessDate.replaceAll("-", "").slice(2)}-${String(sequence.lastNumber).padStart(4, "0")}`;
+    const [movement] = await tx
+      .insert(stockMovements)
+      .values({
+        tenantId: actor.tenantId,
+        outletId: order.outletId,
+        movementNo,
+        movementType,
+        businessDate,
+        referenceType:
+          movementType === "sale_consumption"
+            ? "sales_order"
+            : "sales_order_cancel",
+        referenceId: order.id,
+        reversalOfId: options?.reversalOfId,
+        reason: options?.reason,
+        createdBy: actor.userId,
+        updatedBy: actor.userId,
+      })
+      .returning();
+    return movement;
+  }
+
+  private async reverseConsumption(
+    tx: DbExecutor,
+    actor: AuthUser,
+    order: any,
+    reason: string,
+  ) {
+    const [original] = await tx
+      .select()
+      .from(stockMovements)
+      .where(
+        and(
+          eq(stockMovements.tenantId, actor.tenantId),
+          eq(stockMovements.outletId, order.outletId),
+          eq(stockMovements.referenceType, "sales_order"),
+          eq(stockMovements.referenceId, order.id),
+          eq(stockMovements.movementType, "sale_consumption"),
+          eq(stockMovements.status, "posted"),
+        ),
+      )
+      .limit(1);
+    if (!original)
+      throw new ConflictException(
+        "CONSUMPTION_NOT_FOUND: Ledger consumption tidak ditemukan.",
+      );
+    await tx.execute(
+      sql`select id from stock_movements where id = ${original.id} and tenant_id = ${actor.tenantId} for update`,
+    );
+    const [existingReversal] = await tx
+      .select({ id: stockMovements.id })
+      .from(stockMovements)
+      .where(
+        and(
+          eq(stockMovements.tenantId, actor.tenantId),
+          eq(stockMovements.reversalOfId, original.id),
+          eq(stockMovements.movementType, "reversal"),
+        ),
+      )
+      .limit(1);
+    if (existingReversal)
+      throw new ConflictException(
+        "ORDER_ALREADY_CANCELLED: Consumption sudah direversal.",
+      );
+    const originalLines = await tx
+      .select()
+      .from(stockMovementLines)
+      .where(
+        and(
+          eq(stockMovementLines.tenantId, actor.tenantId),
+          eq(stockMovementLines.stockMovementId, original.id),
+        ),
+      )
+      .orderBy(
+        asc(stockMovementLines.stockBatchId),
+        asc(stockMovementLines.id),
+      );
+    const batchIds = originalLines
+      .map((line: any) => line.stockBatchId)
+      .filter((value: unknown): value is string => Boolean(value));
+    if (batchIds.length) {
+      await tx.execute(
+        sql`select id from stock_batches where tenant_id = ${actor.tenantId} and outlet_id = ${order.outletId} and id in (${sql.join(
+          [...new Set(batchIds)].sort().map((batchId) => sql`${batchId}`),
+          sql`, `,
+        )}) order by id for update`,
+      );
+    }
+    const outlet = await this.outletContext(actor.tenantId, order.outletId, tx);
+    if (!outlet) throw new ConflictException("OUTLET_NOT_ACTIVE");
+    const reversalBusinessDate = await this.businessDate(outlet, tx);
+    const reversal = await this.createStockMovement(
+      tx,
+      actor,
+      { ...order, businessDate: reversalBusinessDate },
+      "reversal",
+      { reversalOfId: original.id, reason },
+    );
+    for (const line of originalLines) {
+      if (!line.stockBatchId)
+        throw new ConflictException(
+          "REVERSAL_INVALID: Original consumption tidak memiliki batch.",
+        );
+      const restoreMilli = -this.parseSignedFixed(line.quantityDelta, 3);
+      const restoreValueMinor = -this.parseSignedFixed(line.valueDelta, 2);
+      if (restoreMilli <= 0n || restoreValueMinor < 0n)
+        throw new ConflictException(
+          "REVERSAL_INVALID: Nilai original consumption tidak valid.",
+        );
+      await tx
+        .update(stockBatches)
+        .set({
+          quantityOnHand: sql`${stockBatches.quantityOnHand} + ${formatFixed(restoreMilli, 3)}`,
+          updatedAt: new Date(),
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(stockBatches.id, line.stockBatchId),
+            eq(stockBatches.tenantId, actor.tenantId),
+            eq(stockBatches.outletId, order.outletId),
+          ),
+        );
+      const [locationBalance] = await tx
+        .select({
+          value: sql<number>`coalesce(sum(${stockBatches.quantityOnHand}), 0)`,
+        })
+        .from(stockBatches)
+        .where(
+          and(
+            eq(stockBatches.tenantId, actor.tenantId),
+            eq(stockBatches.outletId, order.outletId),
+            eq(stockBatches.ingredientId, line.ingredientId),
+            eq(stockBatches.storageLocationId, line.storageLocationId),
+          ),
+        );
+      const [reversalLine] = await tx
+        .insert(stockMovementLines)
+        .values({
+          tenantId: actor.tenantId,
+          stockMovementId: reversal.id,
+          ingredientId: line.ingredientId,
+          storageLocationId: line.storageLocationId,
+          stockBatchId: line.stockBatchId,
+          quantityDelta: formatFixed(restoreMilli, 3) as any,
+          unitCost: line.unitCost,
+          valueDelta: formatMinor(restoreValueMinor) as any,
+          balanceAfter: Number(locationBalance.value),
+          createdBy: actor.userId,
+          updatedBy: actor.userId,
+        })
+        .returning({ id: stockMovementLines.id });
+      await tx
+        .update(salesItemConsumptions)
+        .set({
+          status: "reversed",
+          reversalStockMovementLineId: reversalLine.id,
+          updatedAt: new Date(),
+          updatedBy: actor.userId,
+        })
+        .where(
+          and(
+            eq(salesItemConsumptions.tenantId, actor.tenantId),
+            eq(salesItemConsumptions.salesOrderId, order.id),
+            eq(salesItemConsumptions.stockMovementLineId, line.id),
+            eq(salesItemConsumptions.status, "posted"),
+          ),
+        );
+    }
+    return {
+      originalMovementId: original.id,
+      reversalMovementId: reversal.id,
+    };
+  }
+
+  private async acquireOperation(
+    tx: DbExecutor,
+    actor: AuthUser,
+    outletId: string,
+    idempotencyKey: string,
+    operation: string,
+    requestHash: string,
+  ) {
+    const [created] = await tx
+      .insert(posOperationRequests)
+      .values({
+        tenantId: actor.tenantId,
+        outletId,
+        idempotencyKey,
+        operation,
+        requestHash,
+      })
+      .onConflictDoNothing()
+      .returning({ id: posOperationRequests.id });
+    if (created) return { id: created.id, replay: false };
+    const [existing] = await tx
+      .select()
+      .from(posOperationRequests)
+      .where(
+        and(
+          eq(posOperationRequests.tenantId, actor.tenantId),
+          eq(posOperationRequests.idempotencyKey, idempotencyKey),
+        ),
+      )
+      .limit(1);
+    if (
+      !existing ||
+      existing.operation !== operation ||
+      existing.requestHash !== requestHash
+    )
+      throw new ConflictException(
+        "IDEMPOTENCY_CONFLICT: Key digunakan untuk payload berbeda.",
+      );
+    if (existing.status === "completed" && existing.salesOrderId)
+      return { id: existing.id, replay: true };
+    if (existing.leaseExpiresAt > new Date())
+      throw new ConflictException(
+        "IDEMPOTENCY_IN_PROGRESS: Request sedang diproses.",
+      );
+    const [claimed] = await tx
+      .update(posOperationRequests)
+      .set({
+        status: "processing",
+        leaseExpiresAt: sql`now() + interval '5 minutes'`,
+        completedAt: null,
+        errorCode: null,
+      })
+      .where(
+        and(
+          eq(posOperationRequests.id, existing.id),
+          lte(posOperationRequests.leaseExpiresAt, new Date()),
+        ),
+      )
+      .returning({ id: posOperationRequests.id });
+    if (!claimed)
+      throw new ConflictException(
+        "IDEMPOTENCY_IN_PROGRESS: Request sedang diproses.",
+      );
+    return { id: claimed.id, replay: false };
+  }
+
+  private async completeOperation(
+    tx: DbExecutor,
+    operationId: string,
+    orderId: string,
+  ) {
+    await tx
+      .update(posOperationRequests)
+      .set({
+        status: "completed",
+        salesOrderId: orderId,
+        responseStatus: 200,
+        responseBody: { orderId },
+        completedAt: new Date(),
+      })
+      .where(eq(posOperationRequests.id, operationId));
+  }
+
+  private parseSignedFixed(value: string | number, scale: number) {
+    const normalized = String(value);
+    return normalized.startsWith("-")
+      ? -parseFixed(normalized.slice(1), scale)
+      : parseFixed(normalized, scale);
+  }
+
   private async normalizeItems(
     tenantId: string,
     outletId: string,
@@ -717,15 +1698,13 @@ export class PosService {
     orderId: string,
     items: any[],
   ) {
-    await tx
-      .insert(salesOrderItems)
-      .values(
-        items.map(({ lineSubtotalMinor: _minor, ...item }) => ({
-          ...item,
-          tenantId: actor.tenantId,
-          salesOrderId: orderId,
-        })),
-      );
+    await tx.insert(salesOrderItems).values(
+      items.map(({ lineSubtotalMinor: _minor, ...item }) => ({
+        ...item,
+        tenantId: actor.tenantId,
+        salesOrderId: orderId,
+      })),
+    );
   }
 
   private async assertOutletAccess(actor: AuthUser, outletId: string) {

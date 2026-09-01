@@ -16,7 +16,12 @@ import {
   ListPosOrdersQueryDto,
   PosLookupQueryDto,
 } from "./dto/list-pos-orders-query.dto";
-import { CreatePosOrderDto, UpdatePosOrderDto } from "./dto/pos.dto";
+import {
+  CreatePosOrderDto,
+  PosMutationDto,
+  PosReasonMutationDto,
+  UpdatePosOrderDto,
+} from "./dto/pos.dto";
 import { PosService } from "./pos.service";
 
 @ApiTags("POS")
@@ -57,5 +62,25 @@ export class PosController {
     @Body() dto: UpdatePosOrderDto,
   ) {
     return this.pos.update(actor, id, dto);
+  }
+
+  @Post("orders/:id/submit")
+  @RequirePermissions("pos.submit")
+  submit(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: PosMutationDto,
+  ) {
+    return this.pos.submit(actor, id, dto);
+  }
+
+  @Post("orders/:id/cancel")
+  @RequirePermissions("pos.cancel")
+  cancel(
+    @CurrentUser() actor: AuthUser,
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: PosReasonMutationDto,
+  ) {
+    return this.pos.cancel(actor, id, dto);
   }
 }
