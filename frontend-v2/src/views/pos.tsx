@@ -1,328 +1,57 @@
-import { Minus, Plus, Search, Trash2, ReceiptText } from "lucide-react";
-import { useMemo, useState } from "react";
+import { AlertTriangle, Minus, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Btn, Card, Tabs, Badge, Drawer, Field, TextInput, SelectInput, TextArea, Modal, StatusBadge, EmptyState } from "@/components/ui";
-import { POS_MENU, POS_TAX_RATE, POS_SERVICE_RATE, POS_PROMO_RATE, POS_TRANSACTIONS, ACTIVE_ORDERS, idr, type PosTransaction, type ActiveOrder } from "@/lib/mock-data";
+import { Badge, Btn, Card, Drawer, EmptyState, Field, Modal, SelectInput, StatusBadge, Tabs, TextArea, TextInput } from "@/components/ui";
+import { useAuth } from "@/contexts/auth-context";
+import { ApiError } from "@/lib/api/types";
 
-interface CartItem { sku: string; name: string; price: number; qty: number }
-type PayMethod = "Tunai" | "QRIS" | "Kartu" | "Split";
+type OrderType="dine_in"|"takeaway";type PaymentMethod="cash"|"qris_manual"|"card_manual";
+type Category={id:string;code:string;name:string;displayOrder:number};
+type Variant={categoryId:string;categoryName:string;menuId:string;menuCode:string;menuName:string;variantId:string;variantCode:string;variantName:string;sellingPrice:string|null;priceSource:"base"|"outlet_override";currencyCode:string;requiresRecipe:boolean;requiresKitchen:boolean;isReadyForSale:boolean;notReadyReason:string|null};
+type Lookup={outlet:{id:string;code:string;name:string};currencyCode:string;categories:Category[];variants:Variant[]};
+type CartItem={variantId:string;menuName:string;variantName:string;price:string;quantity:number;notes:string;requiresKitchen:boolean};
+type Payment={id:string;entryType:"payment"|"manual_refund";method:PaymentMethod;status:string;currencyCode:string;amountApplied:string;amountTendered:string;changeAmount:string;externalReference?:string|null;reason?:string|null;paidAt?:string|null;voidedAt?:string|null;createdAt:string};
+type OrderItem={id:string;menuVariantId:string;menuNameSnapshot:string;variantNameSnapshot:string;quantity:number;unitPrice:string;lineSubtotal:string;notes?:string|null;requiresKitchen:boolean;status:string;lockVersion:number};
+type Order={id:string;outletId:string;orderNo:string;receiptNo?:string|null;businessDate:string;orderType:OrderType;tableNumber?:string|null;customerName?:string|null;notes?:string|null;currencyCode:string;status:string;paymentStatus:string;subtotal:string;totalAmount:string;lockVersion:number;createdAt:string;updatedAt:string;items:OrderItem[];payments:Payment[];history:unknown[];itemStatusHistory:unknown[]};
+type Summary=Omit<Order,"items"|"payments"|"history"|"itemStatusHistory">&{itemCount:number};type ListResponse={data:Summary[];pagination:{page:number;limit:number;total:number}};type Risk={kind:"cancel"|"void";reason:string;refundReference:string}|null;
+const emptyLookup:Lookup={outlet:{id:"",code:"",name:""},currencyCode:"IDR",categories:[],variants:[]};
+const businessMessages:Record<string,string>={PRICE_CHANGED:"Harga berubah. Muat ulang katalog lalu perbarui draft.",RECIPE_NOT_READY:"Recipe belum siap untuk dijual.",INSUFFICIENT_STOCK:"Stok bahan tidak mencukupi.",MASTER_NOT_AVAILABLE:"Menu atau Variant tidak lagi tersedia.",STALE_ORDER_VERSION:"Order berubah di perangkat lain. Muat ulang detail.",ORDER_ALREADY_PAID:"Order sudah dibayar.",PAYMENT_AMOUNT_INSUFFICIENT:"Uang tunai kurang dari total order.",PAYMENT_AMOUNT_MISMATCH:"Nominal QRIS/kartu harus sama dengan total.",PAYMENT_REFERENCE_REQUIRED:"Referensi pembayaran eksternal wajib diisi.",KITCHEN_ITEMS_NOT_READY:"Menunggu seluruh item dapur siap."};
 
-const CATEGORIES = ["Semua", "Makanan", "Minuman", "Dessert"];
-const ORDER_TYPES = ["Dine-in", "Takeaway", "Delivery"];
-const TABLES = ["M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9"];
-
-export function PosView() {
-  const [tab, setTab] = useState("kasir");
-  const [q, setQ] = useState("");
-  const [cat, setCat] = useState("Semua");
-  const [orderType, setOrderType] = useState("Dine-in");
-  const [table, setTable] = useState("M1");
-  const [customer, setCustomer] = useState("");
-  const [cart, setCart] = useState<CartItem[]>([]);
-  const [promo, setPromo] = useState(false);
-  const [payOpen, setPayOpen] = useState(false);
-  const [method, setMethod] = useState<PayMethod>("Tunai");
-  const [received, setReceived] = useState(0);
-  const [note, setNote] = useState("");
-  const [transactions, setTransactions] = useState<PosTransaction[]>(POS_TRANSACTIONS);
-  const [orders, setOrders] = useState<ActiveOrder[]>(ACTIVE_ORDERS);
-  const [trxFilter, setTrxFilter] = useState("");
-  const [trxSelected, setTrxSelected] = useState<PosTransaction | null>(null);
-  const [orderFilter, setOrderFilter] = useState("all");
-  const [shiftOpen, setShiftOpen] = useState(false);
-
-  const menu = useMemo(
-    () => POS_MENU.filter((m) => (cat === "Semua" || m.category === cat) && m.name.toLowerCase().includes(q.toLowerCase())),
-    [q, cat]
-  );
-
-  const subtotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
-  const discount = promo ? (subtotal * POS_PROMO_RATE) / 100 : 0;
-  const tax = ((subtotal - discount) * POS_TAX_RATE) / 100;
-  const service = ((subtotal - discount) * POS_SERVICE_RATE) / 100;
-  const total = subtotal - discount + tax + service;
-
-  const setQty = (sku: string, delta: number) => {
-    setCart((prev) =>
-      prev
-        .map((i) => (i.sku === sku ? { ...i, qty: i.qty + delta } : i))
-        .filter((i) => i.qty > 0) // qty nol menghapus item
-    );
-  };
-  const addItem = (sku: string, name: string, price: number) => {
-    setCart((prev) => (prev.some((i) => i.sku === sku) ? prev.map((i) => (i.sku === sku ? { ...i, qty: i.qty + 1 } : i)) : [...prev, { sku, name, price, qty: 1 }]));
-  };
-
-  const confirmPayment = () => {
-    if (cart.length === 0) return;
-    if (method === "Tunai" && received < total) { toast.error("Uang diterima kurang dari total"); return; }
-    const no = `TRX-${913 + transactions.length}`;
-    setTransactions((p) => [{ no, time: "2026-08-29 13:10", type: orderType, table: orderType === "Dine-in" ? table : undefined, customer: customer || undefined, items: cart.map((c) => ({ name: c.name, qty: c.qty, price: c.price })), total, method, status: "paid" }, ...p]);
-    setOrders((p) => [{ no: `ORD-0${454 + p.length}`, type: orderType, table: orderType === "Dine-in" ? table : undefined, items: cart.reduce((s, c) => s + c.qty, 0), total, status: "baru", since: "13:10" }, ...p]);
-    setPayOpen(false); setCart([]); setPromo(false); setReceived(0); setNote("");
-    toast.success(`Pembayaran ${no} berhasil · ${idr(total)}`);
-  };
-
-  const trxList = transactions.filter((t) => `${t.no} ${t.customer ?? ""} ${t.table ?? ""}`.toLowerCase().includes(trxFilter.toLowerCase()));
-  const orderList = orders.filter((o) => orderFilter === "all" || o.status === orderFilter);
-  const shiftTotal = transactions.filter((t) => t.status === "paid").reduce((s, t) => s + t.total, 0);
-
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">POS</h1>
-          <p className="mt-1 text-[13px] text-mute">Kasir, pesanan aktif, riwayat, dan shift</p>
-        </div>
-        <Tabs
-          value={tab}
-          onChange={setTab}
-          tabs={[
-            { id: "kasir", label: "Kasir" },
-            { id: "aktif", label: "Pesanan Aktif", count: orders.filter((o) => o.status !== "selesai").length },
-            { id: "riwayat", label: "Riwayat Transaksi", count: transactions.length },
-            { id: "shift", label: "Shift" },
-          ]}
-        />
-      </div>
-
-      {tab === "kasir" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
-          <div className="space-y-4">
-            <Card className="p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative flex-1 min-w-40">
-                  <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute/70" />
-                  <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cari menu…" className="pl-8" />
-                </div>
-                {CATEGORIES.map((c) => (
-                  <button key={c} onClick={() => setCat(c)} className={`rounded-lg px-3 py-2 text-[12px] font-medium transition-colors ${cat === c ? "bg-olive-soft text-olive-deep" : "text-mute hover:bg-black/5"}`}>{c}</button>
-                ))}
-              </div>
-            </Card>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-              {menu.map((m) => (
-                <button key={m.sku} onClick={() => addItem(m.sku, m.name, m.price)} className="rounded-xl bg-card p-3.5 text-left ring-1 ring-black/5 transition-shadow hover:ring-olive/40">
-                  <p className="text-[13px] font-medium leading-snug">{m.name}</p>
-                  <p className="mt-1 text-[11px] text-mute">{m.category}</p>
-                  <p className="mono mt-2 text-[13px] font-semibold text-olive-deep">{idr(m.price)}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <Card className="flex h-fit flex-col p-4 xl:sticky xl:top-0">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[14px] font-semibold tracking-tight">Keranjang</h2>
-              <Badge tone={cart.length ? "olive" : "mute"}>{cart.reduce((s, i) => s + i.qty, 0)} item</Badge>
-            </div>
-            <div className="mt-3 space-y-2">
-              <div className="flex gap-1 rounded-lg bg-black/[0.04] p-1">
-                {ORDER_TYPES.map((t) => (
-                  <button key={t} onClick={() => setOrderType(t)} className={`flex-1 rounded-md px-2 py-1.5 text-[12px] font-medium ${orderType === t ? "bg-card ring-1 ring-black/10" : "text-mute"}`}>{t}</button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {orderType === "Dine-in" && (
-                  <SelectInput value={table} onChange={(e) => setTable(e.target.value)}>
-                    {TABLES.map((t) => <option key={t} value={t}>Meja {t}</option>)}
-                  </SelectInput>
-                )}
-                <TextInput value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Pelanggan (opsional)" className={orderType === "Dine-in" ? "" : "col-span-2"} />
-              </div>
-            </div>
-            <div className="mt-3 max-h-56 space-y-1.5 overflow-y-auto scrollbar-thin">
-              {cart.length === 0 && <EmptyState title="Keranjang kosong" hint="Pilih menu untuk menambahkan item" />}
-              {cart.map((i) => (
-                <div key={i.sku} className="flex items-center gap-2 rounded-lg bg-cream px-2.5 py-2 ring-1 ring-black/5">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12.5px] font-medium">{i.name}</p>
-                    <p className="mono text-[11px] text-mute">{idr(i.price)}</p>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => setQty(i.sku, -1)} className="rounded-md p-1 ring-1 ring-black/10 hover:bg-black/5"><Minus className="size-3" /></button>
-                    <span className="mono w-6 text-center text-[12.5px]">{i.qty}</span>
-                    <button onClick={() => setQty(i.sku, 1)} className="rounded-md p-1 ring-1 ring-black/10 hover:bg-black/5"><Plus className="size-3" /></button>
-                    <button onClick={() => setCart((p) => p.filter((x) => x.sku !== i.sku))} className="rounded-md p-1 text-terra hover:bg-terra/10"><Trash2 className="size-3" /></button>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <label className="mt-3 flex items-center justify-between rounded-lg bg-olive-soft px-3 py-2 text-[12.5px] font-medium text-olive-deep">
-              <span>Promo member {POS_PROMO_RATE}%</span>
-              <input type="checkbox" checked={promo} onChange={(e) => setPromo(e.target.checked)} className="accent-[oklch(0.52_0.065_128)]" />
-            </label>
-            <div className="mt-3 space-y-1 text-[12.5px]">
-              <div className="flex justify-between"><span className="text-mute">Subtotal</span><span className="mono">{idr(subtotal)}</span></div>
-              {discount > 0 && <div className="flex justify-between text-olive"><span>Diskon promo</span><span className="mono">−{idr(discount)}</span></div>}
-              <div className="flex justify-between"><span className="text-mute">Pajak {POS_TAX_RATE}%</span><span className="mono">{idr(tax)}</span></div>
-              <div className="flex justify-between"><span className="text-mute">Service {POS_SERVICE_RATE}%</span><span className="mono">{idr(service)}</span></div>
-              <div className="flex justify-between border-t border-black/10 pt-2 text-[14px] font-semibold"><span>Total</span><span className="mono">{idr(total)}</span></div>
-            </div>
-            <Btn className="mt-3 w-full" disabled={cart.length === 0} onClick={() => setPayOpen(true)}>
-              Bayar {cart.length > 0 && `· ${idr(total)}`}
-            </Btn>
-          </Card>
-        </div>
-      )}
-
-      {tab === "aktif" && (
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-black/5 px-4 py-3">
-            <h2 className="text-[14px] font-semibold tracking-tight">Pesanan Aktif</h2>
-            <div className="flex gap-1 rounded-lg bg-black/[0.04] p-1">
-              {["all", "baru", "diproses", "siap"].map((s) => (
-                <button key={s} onClick={() => setOrderFilter(s)} className={`rounded-md px-2.5 py-1 text-[12px] font-medium capitalize ${orderFilter === s ? "bg-card ring-1 ring-black/10" : "text-mute"}`}>{s === "all" ? "Semua" : s}</button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-            {orderList.map((o) => (
-              <Card key={o.no} className="p-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="mono text-[13px] font-semibold">{o.no}</span>
-                  <StatusBadge label={o.status} />
-                </div>
-                <p className="mt-1 text-[12px] text-mute">{o.type}{o.table && ` · Meja ${o.table}`} · {o.items} item · sejak {o.since}</p>
-                <div className="mt-3 flex items-center justify-between">
-                  <span className="mono text-[13px] font-semibold">{idr(o.total)}</span>
-                  {o.status !== "selesai" && (
-                    <Btn variant="outline" className="px-2.5 py-1 text-[12px]" onClick={() => {
-                      const next: ActiveOrder["status"] = o.status === "baru" ? "diproses" : o.status === "diproses" ? "siap" : "selesai";
-                      setOrders((p) => p.map((x) => (x.no === o.no ? { ...x, status: next } : x)));
-                      toast.success(`${o.no} → ${next}`);
-                    }}>Lanjut</Btn>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {tab === "riwayat" && (
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-black/5 px-4 py-3">
-            <h2 className="text-[14px] font-semibold tracking-tight">Riwayat Transaksi</h2>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute/70" />
-              <TextInput value={trxFilter} onChange={(e) => setTrxFilter(e.target.value)} placeholder="Cari transaksi…" className="w-48 pl-8" />
-            </div>
-          </div>
-          <div className="divide-y divide-black/5">
-            {trxList.map((t) => (
-              <button key={t.no} onClick={() => setTrxSelected(t)} className="flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-black/[0.02]">
-                <span className="mono w-24 text-[13px] font-medium">{t.no}</span>
-                <span className="flex-1 text-[12.5px]">{t.type}{t.table && ` · ${t.table}`}{t.customer && ` · ${t.customer}`}</span>
-                <Badge tone={t.status === "void" ? "terra" : "neutral"}>{t.method}</Badge>
-                <span className="mono text-[13px] font-semibold">{idr(t.total)}</span>
-                {t.status === "void" && <StatusBadge label="cancelled" />}
-              </button>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {tab === "shift" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <Card className="p-4">
-            <h2 className="text-[14px] font-semibold tracking-tight">Ringkasan Shift</h2>
-            <p className="mt-0.5 text-[12px] text-mute">Shift pagi · dibuka 07:00 oleh Bima Pratama</p>
-            <div className="mt-4 space-y-2.5 text-[13px]">
-              {[
-                ["Total penjualan", idr(shiftTotal)],
-                ["Transaksi selesai", String(transactions.filter((t) => t.status === "paid").length)],
-                ["Transaksi void", String(transactions.filter((t) => t.status === "void").length)],
-                ["Tunai", idr(transactions.filter((t) => t.method === "Tunai" && t.status === "paid").reduce((s, t) => s + t.total, 0))],
-                ["QRIS", idr(transactions.filter((t) => t.method === "QRIS" && t.status === "paid").reduce((s, t) => s + t.total, 0))],
-                ["Kartu", idr(transactions.filter((t) => t.method === "Kartu" && t.status === "paid").reduce((s, t) => s + t.total, 0))],
-              ].map(([l, v]) => (
-                <div key={l} className="flex justify-between"><span className="text-mute">{l}</span><span className="mono font-medium">{v}</span></div>
-              ))}
-            </div>
-            <Btn className="mt-4 w-full" onClick={() => setShiftOpen(true)}>Tutup Shift</Btn>
-          </Card>
-          <Card className="p-4">
-            <h2 className="text-[14px] font-semibold tracking-tight">Riwayat Shift</h2>
-            <ul className="mt-3 space-y-2 text-[12.5px]">
-              {[
-                ["Shift malam · 28 Agu", "Rp 8.940.000", "128 transaksi"],
-                ["Shift pagi · 28 Agu", "Rp 5.120.000", "86 transaksi"],
-                ["Shift malam · 27 Agu", "Rp 9.310.000", "141 transaksi"],
-              ].map(([l, v, s]) => (
-                <li key={l} className="flex items-center justify-between rounded-lg bg-cream px-3 py-2 ring-1 ring-black/5">
-                  <span>{l}<span className="ml-2 text-mute">{s}</span></span>
-                  <span className="mono font-medium">{v}</span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </div>
-      )}
-
-      {/* Payment sheet */}
-      <Drawer open={payOpen} onClose={() => setPayOpen(false)} title="Pembayaran" sub={`Total ${idr(total)}`}>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            {(["Tunai", "QRIS", "Kartu", "Split"] as PayMethod[]).map((m) => (
-              <button key={m} onClick={() => setMethod(m)} className={`rounded-xl px-3 py-3 text-[13px] font-medium ring-1 transition-colors ${method === m ? "bg-olive-soft text-olive-deep ring-olive/50" : "ring-black/10 hover:bg-black/5"}`}>{m}</button>
-            ))}
-          </div>
-          {method === "Tunai" && (
-            <Field label="Uang diterima" required>
-              <TextInput type="number" min={0} value={received || ""} onChange={(e) => setReceived(Number(e.target.value))} placeholder="0" />
-              {received >= total && <p className="mt-1 text-[12px] font-medium text-olive">Kembalian: {idr(received - total)}</p>}
-            </Field>
-          )}
-          {method === "QRIS" && (
-            <div className="rounded-xl bg-cream p-4 text-center ring-1 ring-black/5">
-              <div className="mx-auto grid size-36 grid-cols-6 gap-1 p-2">
-                {Array.from({ length: 36 }).map((_, i) => (
-                  <span key={i} className={`rounded-[2px] ${(i * 7 + 3) % 3 ? "bg-ink/80" : "bg-transparent"}`} />
-                ))}
-              </div>
-              <p className="mt-2 text-[12px] text-mute">Pindai untuk membayar {idr(total)}</p>
-            </div>
-          )}
-          {method === "Kartu" && <p className="rounded-lg bg-cream px-3 py-2 text-[12.5px] text-mute ring-1 ring-black/5">Masukkan kartu debit/kredit ke terminal EDC.</p>}
-          {method === "Split" && <p className="rounded-lg bg-cream px-3 py-2 text-[12.5px] text-mute ring-1 ring-black/5">Split payment: sebagian tunai, sebagian non-tunai dihitung di terminal.</p>}
-          <Field label="Catatan"><TextArea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Catatan transaksi (opsional)" /></Field>
-          <Btn className="w-full" onClick={confirmPayment} disabled={cart.length === 0 || (method === "Tunai" && received < total)}>
-            Konfirmasi Pembayaran · {idr(total)}
-          </Btn>
-        </div>
-      </Drawer>
-
-      {/* Detail transaksi */}
-      <Drawer open={!!trxSelected} onClose={() => setTrxSelected(null)} title={trxSelected?.no ?? ""} sub={trxSelected ? `${trxSelected.type}${trxSelected.table ? ` · Meja ${trxSelected.table}` : ""} · ${trxSelected.time}` : undefined}>
-        {trxSelected && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <Badge tone={trxSelected.status === "void" ? "terra" : "olive"}>{trxSelected.status === "void" ? "Void" : "Lunas"}</Badge>
-              <span className="mono text-[15px] font-semibold">{idr(trxSelected.total)}</span>
-            </div>
-            <ul className="space-y-2">
-              {trxSelected.items.map((i, idx) => (
-                <li key={idx} className="flex justify-between rounded-lg bg-cream px-3 py-2 text-[12.5px] ring-1 ring-black/5">
-                  <span>{i.name} × {i.qty}</span><span className="mono">{idr(i.price * i.qty)}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="text-[12.5px] text-mute">Metode: {trxSelected.method}{trxSelected.customer && ` · ${trxSelected.customer}`}</div>
-          </div>
-        )}
-      </Drawer>
-
-      {/* Konfirmasi tutup shift */}
-      <Modal open={shiftOpen} onClose={() => setShiftOpen(false)} title="Tutup Shift">
-        <div className="space-y-4">
-          <p className="text-[13px] text-mute">Ringkasan akan dikunci dan shift pagi ditutup. Total penjualan: <span className="mono font-semibold text-ink">{idr(shiftTotal)}</span>.</p>
-          <div className="flex justify-end gap-2">
-            <Btn variant="ghost" onClick={() => setShiftOpen(false)}>Batal</Btn>
-            <Btn onClick={() => { setShiftOpen(false); toast.success("Shift ditutup. Ringkasan terkirim ke manajer."); }}>Konfirmasi Tutup Shift</Btn>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
+export function PosView(){
+ const{api,session,activeOutletId,setActiveOutletId}=useAuth();const can=useCallback((p:string)=>(session?.user.permissions??[]).includes(p),[session]);const read=can("pos.read");
+ const[tab,setTab]=useState("kasir"),[lookup,setLookup]=useState<Lookup>(emptyLookup),[rows,setRows]=useState<Summary[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");
+ const[query,setQuery]=useState(""),[category,setCategory]=useState(""),[status,setStatus]=useState(""),[paymentFilter,setPaymentFilter]=useState("");
+ const[cart,setCart]=useState<CartItem[]>([]),[orderType,setOrderType]=useState<OrderType>("dine_in"),[tableNumber,setTableNumber]=useState(""),[customerName,setCustomerName]=useState(""),[orderNotes,setOrderNotes]=useState("");
+ const[detail,setDetail]=useState<Order|null>(null),[detailOpen,setDetailOpen]=useState(false),[detailLoading,setDetailLoading]=useState(false),[saving,setSaving]=useState(""),[payOpen,setPayOpen]=useState(false),[method,setMethod]=useState<PaymentMethod>("cash"),[tendered,setTendered]=useState(""),[externalReference,setExternalReference]=useState(""),[risk,setRisk]=useState<Risk>(null),[actionError,setActionError]=useState("");
+ const keys=useRef(new Map<string,{hash:string;key:string}>()),previousOutlet=useRef("");
+ const mutationKey=(action:string,payload:unknown)=>{const hash=JSON.stringify(payload),old=keys.current.get(action);if(old?.hash===hash)return old.key;const key=crypto.randomUUID();keys.current.set(action,{hash,key});return key};const done=(action:string)=>keys.current.delete(action);
+ const load=useCallback(async()=>{if(!read||!activeOutletId){setLoading(false);return}setLoading(true);setError("");try{const p=new URLSearchParams({outletId:activeOutletId,page:"1",limit:"100"});if(query.trim())p.set("search",query.trim());if(status)p.set("status",status);if(paymentFilter)p.set("paymentStatus",paymentFilter);const[l,r]=await Promise.all([api<Lookup>(`/pos/lookups?outletId=${encodeURIComponent(activeOutletId)}`),api<ListResponse>(`/pos/orders?${p}`)]);setLookup(l);setRows(r.data)}catch(e){setError(message(e))}finally{setLoading(false)}},[activeOutletId,api,paymentFilter,query,read,status]);
+ useEffect(()=>{void load()},[load]);
+ useEffect(()=>{if(!activeOutletId)return;if(previousOutlet.current&&previousOutlet.current!==activeOutletId&&(cart.length||detail)){if(!window.confirm("Ganti outlet akan mengosongkan keranjang dan order terpilih. Lanjutkan?")){setActiveOutletId(previousOutlet.current);return}setCart([]);setDetail(null);setDetailOpen(false);setCategory("");keys.current.clear()}previousOutlet.current=activeOutletId},[activeOutletId,cart.length,detail,setActiveOutletId]);
+ const openDetail=useCallback(async(id:string)=>{setDetailOpen(true);setDetailLoading(true);setActionError("");try{setDetail(await api<Order>(`/pos/orders/${id}`))}catch(e){setActionError(message(e))}finally{setDetailLoading(false)}},[api]);
+ const variants=useMemo(()=>lookup.variants.filter(v=>(!category||v.categoryId===category)&&`${v.menuName} ${v.variantName} ${v.variantCode}`.toLowerCase().includes(query.toLowerCase())),[category,lookup.variants,query]);
+ const previewTotal=cart.reduce((sum,item)=>sum+Number(item.price)*item.quantity,0),authoritativeTotal=detail?Number(detail.totalAmount):previewTotal;
+ function add(v:Variant){if(!v.isReadyForSale||!v.sellingPrice){toast.error(v.notReadyReason==="RECIPE_NOT_READY"?"Recipe belum siap.":"Menu belum siap dijual.");return}if(detail?.status!=="draft")setDetail(null);setCart(old=>old.some(x=>x.variantId===v.variantId)?old.map(x=>x.variantId===v.variantId?{...x,quantity:x.quantity+1}:x):[...old,{variantId:v.variantId,menuName:v.menuName,variantName:v.variantName,price:v.sellingPrice!,quantity:1,notes:"",requiresKitchen:v.requiresKitchen}])}
+ function quantity(id:string,delta:number){setCart(old=>old.flatMap(x=>x.variantId!==id?[x]:x.quantity+delta>0?[{...x,quantity:x.quantity+delta}]:window.confirm("Hapus item dari keranjang?")?[]:[x]))}
+ function payload(){return{orderType,tableNumber:orderType==="dine_in"?tableNumber.trim():null,customerName:customerName.trim()||null,notes:orderNotes.trim()||null,items:cart.map(x=>({menuVariantId:x.variantId,quantity:x.quantity,...(x.notes.trim()?{notes:x.notes.trim()}:{})}))}}
+ function validateCart(){if(!activeOutletId)return"Outlet aktif wajib dipilih.";if(!cart.length)return"Keranjang masih kosong.";if(orderType==="dine_in"&&!tableNumber.trim())return"Nomor meja wajib untuk dine-in.";return""}
+ async function saveDraft(){const invalid=validateCart();if(invalid){setActionError(invalid);return null}const body=payload(),editing=detail?.status==="draft";setSaving("draft");setActionError("");try{const next=editing?await api<Order>(`/pos/orders/${detail.id}`,{method:"PATCH",body:JSON.stringify({...body,lockVersion:detail.lockVersion})}):await api<Order>("/pos/orders",{method:"POST",body:JSON.stringify({...body,outletId:activeOutletId,idempotencyKey:mutationKey("create",body)})});done("create");setDetail(next);toast.success(editing?"Draft diperbarui.":`Draft ${next.orderNo} dibuat.`);await load();return next}catch(e){setActionError(message(e));return null}finally{setSaving("")}}
+ async function submit(){const order=detail?.status==="draft"?await saveDraft():detail;if(!order||order.status!=="draft")return;const body={lockVersion:order.lockVersion};setSaving("submit");try{const next=await api<Order>(`/pos/orders/${order.id}/submit`,{method:"POST",body:JSON.stringify({...body,idempotencyKey:mutationKey("submit",body)})});done("submit");setDetail(next);toast.success("Order dikirim ke dapur.");await load()}catch(e){setActionError(message(e))}finally{setSaving("")}}
+ function editDraft(order:Order){if(order.status!=="draft")return;setDetail(order);setDetailOpen(false);setOrderType(order.orderType);setTableNumber(order.tableNumber??"");setCustomerName(order.customerName??"");setOrderNotes(order.notes??"");setCart(order.items.map(x=>({variantId:x.menuVariantId,menuName:x.menuNameSnapshot,variantName:x.variantNameSnapshot,price:x.unitPrice,quantity:x.quantity,notes:x.notes??"",requiresKitchen:x.requiresKitchen})));setTab("kasir")}
+ async function pay(){if(!detail)return;const body={lockVersion:detail.lockVersion,method,amountTendered:method==="cash"?tendered:detail.totalAmount,...(method!=="cash"?{externalReference:externalReference.trim()}:{})};setSaving("pay");setActionError("");try{const next=await api<Order>(`/pos/orders/${detail.id}/payments`,{method:"POST",body:JSON.stringify({...body,idempotencyKey:mutationKey("pay",body)})});done("pay");setDetail(next);setPayOpen(false);toast.success(`Pembayaran tercatat · ${next.receiptNo}`);await load()}catch(e){setActionError(message(e))}finally{setSaving("")}}
+ async function complete(){if(!detail||!window.confirm("Selesaikan order ini?"))return;const body={lockVersion:detail.lockVersion};setSaving("complete");try{const next=await api<Order>(`/pos/orders/${detail.id}/complete`,{method:"POST",body:JSON.stringify({...body,idempotencyKey:mutationKey("complete",body)})});done("complete");setDetail(next);toast.success("Order selesai.");await load()}catch(e){setActionError(message(e))}finally{setSaving("")}}
+ async function confirmRisk(){if(!detail||!risk)return;const body={lockVersion:detail.lockVersion,reason:risk.reason.trim(),...(risk.kind==="void"&&risk.refundReference.trim()?{refundReference:risk.refundReference.trim()}:{})};if(body.reason.length<3){setActionError("Alasan minimal tiga karakter.");return}const action=risk.kind;setSaving(action);try{const next=await api<Order>(`/pos/orders/${detail.id}/${action}`,{method:"POST",body:JSON.stringify({...body,idempotencyKey:mutationKey(action,body)})});done(action);setDetail(next);setRisk(null);toast.success(action==="void"?"Payment di-void dan refund manual dicatat.":"Order dibatalkan.");await load()}catch(e){setActionError(message(e))}finally{setSaving("")}}
+ if(!read)return<State title="Akses POS ditolak" text="Permission pos.read diperlukan."/>;if(!activeOutletId)return<State title="Outlet belum dipilih" text="Pilih outlet aktif dari App Shell."/>;
+ const active=rows.filter(x=>!["completed","cancelled"].includes(x.status));
+ return <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold tracking-tight">POS</h1><p className="mt-1 text-[13px] text-mute">Katalog kasir dan transaksi backend · {lookup.outlet.name||"outlet aktif"}</p></div><Tabs value={tab} onChange={setTab} tabs={[{id:"kasir",label:"Kasir"},{id:"aktif",label:"Pesanan Aktif",count:active.length},{id:"riwayat",label:"Riwayat Transaksi",count:rows.length}]}/></div>
+ {error&&<Alert text={error} retry={()=>void load()}/>} {actionError&&<div role="alert" className="rounded-lg bg-terra/10 p-3 text-xs text-terra">{actionError}</div>}
+ {loading?<State title="Memuat POS" text="Mengambil katalog dan transaksi…"/>:tab==="kasir"?<div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]"><div className="space-y-4"><Card className="p-3"><div className="flex flex-wrap gap-2"><div className="relative min-w-44 flex-1"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute"/><TextInput aria-label="Cari menu" className="pl-8" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari menu atau Variant…"/></div><button onClick={()=>setCategory("")} className={chip(!category)}>Semua</button>{lookup.categories.map(c=><button key={c.id} onClick={()=>setCategory(c.id)} className={chip(category===c.id)}>{c.name}</button>)}</div></Card><div className="grid grid-cols-2 gap-3 md:grid-cols-3">{variants.map(v=><button key={v.variantId} disabled={!v.isReadyForSale} onClick={()=>add(v)} className="rounded-xl bg-card p-3.5 text-left ring-1 ring-black/5 hover:ring-olive/40 disabled:cursor-not-allowed disabled:opacity-50"><p className="text-[13px] font-medium">{v.menuName}</p><p className="text-[11px] text-mute">{v.variantName} · {v.categoryName}</p><p className="mono mt-2 text-[13px] font-semibold text-olive-deep">{money(v.sellingPrice,v.currencyCode)}</p><div className="mt-2 flex flex-wrap gap-1">{v.requiresKitchen&&<Badge tone="amber">Dapur</Badge>}{v.priceSource==="outlet_override"&&<Badge tone="mute">Harga outlet</Badge>}{!v.isReadyForSale&&<Badge tone="terra">{v.notReadyReason??"Tidak tersedia"}</Badge>}</div></button>)}</div>{!variants.length&&<EmptyState title="Katalog kosong" hint="Tidak ada Variant yang sesuai filter."/>}</div>
+ <Card className="flex h-fit flex-col p-4 xl:sticky xl:top-0"><div className="flex justify-between"><h2 className="text-sm font-semibold">Keranjang</h2><Badge tone={cart.length?"olive":"mute"}>{cart.reduce((s,x)=>s+x.quantity,0)} item</Badge></div><div className="mt-3 flex gap-1 rounded-lg bg-black/[0.04] p-1">{(["dine_in","takeaway"] as OrderType[]).map(x=><button key={x} onClick={()=>{setOrderType(x);if(x==="takeaway")setTableNumber("")}} className={`flex-1 rounded-md px-2 py-1.5 text-xs ${orderType===x?"bg-card ring-1 ring-black/10":"text-mute"}`}>{x==="dine_in"?"Dine-in":"Takeaway"}</button>)}</div><div className="mt-2 grid gap-2 sm:grid-cols-2">{orderType==="dine_in"&&<TextInput aria-label="Nomor meja" maxLength={30} value={tableNumber} onChange={e=>setTableNumber(e.target.value)} placeholder="Nomor meja *"/>}<TextInput aria-label="Nama pelanggan" className={orderType==="takeaway"?"sm:col-span-2":""} maxLength={150} value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Pelanggan (opsional)"/></div><div className="mt-3 max-h-64 space-y-2 overflow-y-auto">{!cart.length&&<EmptyState title="Keranjang kosong" hint="Pilih Variant dari katalog."/>}{cart.map(x=><div key={x.variantId} className="rounded-lg bg-cream p-2.5 ring-1 ring-black/5"><div className="flex items-center gap-2"><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium">{x.menuName} · {x.variantName}</p><p className="mono text-[11px] text-mute">{money(x.price,lookup.currencyCode)}</p></div><button aria-label="Kurangi" onClick={()=>quantity(x.variantId,-1)} className="rounded p-1 ring-1 ring-black/10"><Minus className="size-3"/></button><span className="mono w-5 text-center text-xs">{x.quantity}</span><button aria-label="Tambah" onClick={()=>quantity(x.variantId,1)} className="rounded p-1 ring-1 ring-black/10"><Plus className="size-3"/></button><button aria-label="Hapus" onClick={()=>setCart(p=>p.filter(i=>i.variantId!==x.variantId))} className="rounded p-1 text-terra"><Trash2 className="size-3"/></button></div><TextInput aria-label={`Catatan ${x.variantName}`} className="mt-2" maxLength={500} value={x.notes} onChange={e=>setCart(p=>p.map(i=>i.variantId===x.variantId?{...i,notes:e.target.value}:i))} placeholder="Catatan item"/></div>)}</div><Field label="Catatan order"><TextArea maxLength={1000} value={orderNotes} onChange={e=>setOrderNotes(e.target.value)} placeholder="Catatan untuk order"/></Field><div className="mt-3 flex justify-between border-t pt-3 text-sm font-semibold"><span>Total preview</span><span className="mono">{money(previewTotal,lookup.currencyCode)}</span></div><p className="mt-1 text-[11px] text-mute">Total final ditentukan backend. Tanpa pajak, service, promo, atau diskon Phase 1.</p><div className="mt-3 grid grid-cols-2 gap-2">{can(detail?.status==="draft"?"pos.update":"pos.create")&&<Btn variant="outline" disabled={Boolean(saving)||!cart.length} onClick={()=>void saveDraft()}>{saving==="draft"?"Menyimpan…":"Simpan Draft"}</Btn>}{can("pos.submit")&&<Btn disabled={Boolean(saving)||!cart.length} onClick={()=>void submit()}>{saving==="submit"?"Mengirim…":"Kirim ke Dapur"}</Btn>}</div></Card></div>:<OrdersPanel rows={tab==="aktif"?active:rows} query={query} setQuery={setQuery} status={status} setStatus={setStatus} payment={paymentFilter} setPayment={setPaymentFilter} open={openDetail} empty={tab==="aktif"?"Tidak ada pesanan aktif.":"Belum ada transaksi."}/>} 
+ <Drawer open={detailOpen} onClose={()=>setDetailOpen(false)} title={detail?.receiptNo||detail?.orderNo||"Detail Order"} sub={detail?`${detail.orderNo} · ${detail.orderType}${detail.tableNumber?` · Meja ${detail.tableNumber}`:""}`:undefined}>{detailLoading?<State title="Memuat detail" text="Mengambil snapshot order…"/>:detail&&<OrderDetail order={detail} can={can} saving={saving} edit={()=>editDraft(detail)} pay={()=>{setTendered(detail.totalAmount);setExternalReference("");setPayOpen(true)}} complete={()=>void complete()} cancel={()=>setRisk({kind:"cancel",reason:"",refundReference:""})} voidOrder={()=>setRisk({kind:"void",reason:"",refundReference:""})}/>}</Drawer>
+ <Drawer open={payOpen} onClose={()=>setPayOpen(false)} title="Pembayaran" sub={`Total backend ${money(authoritativeTotal,detail?.currencyCode||lookup.currencyCode)}`}><div className="space-y-4"><div className="grid grid-cols-3 gap-2">{(["cash","qris_manual","card_manual"] as PaymentMethod[]).map(x=><button key={x} onClick={()=>setMethod(x)} className={`rounded-xl px-2 py-3 text-xs ring-1 ${method===x?"bg-olive-soft text-olive-deep ring-olive/50":"ring-black/10"}`}>{methodLabel(x)}</button>)}</div>{method==="cash"?<Field label="Uang diterima" required><TextInput inputMode="decimal" value={tendered} onChange={e=>setTendered(e.target.value)} placeholder="0.00"/>{Number(tendered)>=authoritativeTotal&&<p className="mt-1 text-xs text-olive">Preview kembalian: {money(Number(tendered)-authoritativeTotal,detail?.currencyCode)}</p>}</Field>:<><p className="rounded-lg bg-cream p-3 text-xs text-mute">Catat pembayaran manual dari terminal/aplikasi eksternal. Sistem tidak memanggil gateway atau membuat QR.</p><Field label="Referensi eksternal" required><TextInput maxLength={150} value={externalReference} onChange={e=>setExternalReference(e.target.value)} placeholder="Nomor referensi terminal"/></Field></>}<Btn className="w-full" disabled={saving==="pay"||!detail||(method==="cash"&&Number(tendered)<authoritativeTotal)||(method!=="cash"&&!externalReference.trim())} onClick={()=>void pay()}>{saving==="pay"?"Mencatat…":"Konfirmasi Pembayaran"}</Btn></div></Drawer>
+ <Modal open={Boolean(risk)} onClose={()=>setRisk(null)} title={risk?.kind==="void"?"Void pembayaran":"Batalkan order"}>{risk&&<div className="space-y-3"><div className="rounded-lg bg-terra/10 p-3 text-xs text-terra"><AlertTriangle className="mr-1 inline size-4"/>{risk.kind==="void"?"Refund dilakukan manual dan Inventory direversal. Tidak ada refund gateway otomatis.":"Order submitted akan menjalankan Inventory reversal."}</div><Field label="Alasan" required><TextArea autoFocus minLength={3} maxLength={500} value={risk.reason} onChange={e=>setRisk({...risk,reason:e.target.value})}/></Field>{risk.kind==="void"&&<Field label="Referensi refund (wajib untuk QRIS/kartu)"><TextInput maxLength={150} value={risk.refundReference} onChange={e=>setRisk({...risk,refundReference:e.target.value})}/></Field>}<div className="flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setRisk(null)}>Batal</Btn><Btn variant="danger" disabled={Boolean(saving)} onClick={()=>void confirmRisk()}>{saving?"Memproses…":"Konfirmasi"}</Btn></div></div>}</Modal></div>
 }
+
+function OrdersPanel(p:{rows:Summary[];query:string;setQuery:(v:string)=>void;status:string;setStatus:(v:string)=>void;payment:string;setPayment:(v:string)=>void;open:(id:string)=>void;empty:string}){return <Card className="overflow-hidden"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-black/5 p-3"><div className="relative"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute"/><TextInput aria-label="Cari order" className="w-52 pl-8" value={p.query} onChange={e=>p.setQuery(e.target.value)} placeholder="Order, meja, pelanggan…"/></div><div className="flex gap-2"><SelectInput aria-label="Status order" value={p.status} onChange={e=>p.setStatus(e.target.value)}><option value="">Semua status</option>{["draft","submitted","preparing","ready","completed","cancelled"].map(x=><option key={x}>{x}</option>)}</SelectInput><SelectInput aria-label="Status pembayaran" value={p.payment} onChange={e=>p.setPayment(e.target.value)}><option value="">Semua payment</option>{["unpaid","paid","voided"].map(x=><option key={x}>{x}</option>)}</SelectInput></div></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-xs"><thead><tr><th>Order / Receipt</th><th>Tanggal</th><th>Tipe</th><th>Item</th><th>Total</th><th>Status</th><th>Payment</th></tr></thead><tbody>{p.rows.map(x=><tr key={x.id} onClick={()=>void p.open(x.id)} className="cursor-pointer border-t hover:bg-black/[0.02]"><td className="p-3"><strong className="mono">{x.orderNo}</strong><p className="text-mute">{x.receiptNo??"Belum ada receipt"}</p></td><td>{x.businessDate}</td><td>{x.orderType}{x.tableNumber?` · ${x.tableNumber}`:""}</td><td>{x.itemCount}</td><td className="mono">{money(x.totalAmount,x.currencyCode)}</td><td><StatusBadge label={x.status}/></td><td><StatusBadge label={x.paymentStatus}/></td></tr>)}</tbody></table></div>{!p.rows.length&&<EmptyState title={p.empty} hint="Ubah filter atau coba muat ulang."/>}</Card>}
+function OrderDetail({order,can,saving,edit,pay,complete,cancel,voidOrder}:{order:Order;can:(p:string)=>boolean;saving:string;edit:()=>void;pay:()=>void;complete:()=>void;cancel:()=>void;voidOrder:()=>void}){const kitchenWaiting=order.items.some(x=>x.requiresKitchen&&x.status!=="ready"&&x.status!=="completed");return <div className="space-y-4"><div className="flex flex-wrap gap-2"><StatusBadge label={order.status}/><StatusBadge label={order.paymentStatus}/><Badge tone="mute">Lock {order.lockVersion}</Badge></div><div className="grid grid-cols-2 gap-3 text-xs"><Metric label="Total backend" value={money(order.totalAmount,order.currencyCode)}/><Metric label="Receipt" value={order.receiptNo??"—"}/><Metric label="Pelanggan" value={order.customerName??"—"}/><Metric label="Dibuat" value={date(order.createdAt)}/></div><ul className="space-y-2">{order.items.map(x=><li key={x.id} className="rounded-lg bg-cream p-3 text-xs ring-1 ring-black/5"><div className="flex justify-between"><span><strong>{x.menuNameSnapshot}</strong> · {x.variantNameSnapshot} × {x.quantity}</span><span className="mono">{money(x.lineSubtotal,order.currencyCode)}</span></div><div className="mt-1 flex gap-2 text-mute"><span>{x.status}</span>{x.requiresKitchen&&<span>· Dapur</span>}{x.notes&&<span>· {x.notes}</span>}</div></li>)}</ul>{order.payments.length>0&&<div><h3 className="mb-2 text-xs font-semibold">Payment / Refund</h3>{order.payments.map(x=><div key={x.id} className="mb-2 rounded-lg border border-black/5 p-3 text-xs"><div className="flex justify-between"><strong>{x.entryType==="manual_refund"?"Refund manual":methodLabel(x.method)}</strong><StatusBadge label={x.status}/></div><p className="mt-1 text-mute">Applied {money(x.amountApplied,x.currencyCode)} · Tendered {money(x.amountTendered,x.currencyCode)} · Kembalian {money(x.changeAmount,x.currencyCode)}</p>{x.externalReference&&<p>Referensi: {x.externalReference}</p>}{x.reason&&<p className="text-terra">{x.reason}</p>}<p className="text-mute">{x.voidedAt?date(x.voidedAt):x.paidAt?date(x.paidAt):date(x.createdAt)}</p></div>)}</div>}<div className="flex flex-wrap gap-2 border-t pt-4">{order.status==="draft"&&can("pos.update")&&<Btn variant="outline" onClick={edit}>Edit Draft</Btn>}{order.status!=="draft"&&!["completed","cancelled"].includes(order.status)&&order.paymentStatus==="unpaid"&&can("pos.pay")&&<Btn disabled={Boolean(saving)} onClick={pay}>Bayar</Btn>}{order.paymentStatus==="paid"&&!["completed","cancelled"].includes(order.status)&&can("pos.complete")&&<Btn disabled={Boolean(saving)||kitchenWaiting} title={kitchenWaiting?"Menunggu dapur":undefined} onClick={complete}>{kitchenWaiting?"Menunggu dapur":"Selesaikan"}</Btn>}{order.paymentStatus==="unpaid"&&!["completed","cancelled"].includes(order.status)&&can("pos.cancel")&&<Btn variant="danger" onClick={cancel}>Batalkan</Btn>}</div>{order.paymentStatus==="paid"&&can("pos.void")&&<div className="border-t border-terra/20 pt-4"><p className="mb-2 text-xs font-semibold text-terra">Tindakan Berisiko</p><Btn variant="danger" onClick={voidOrder}>Void & Catat Refund Manual</Btn></div>}</div>}
+function State({title,text}:{title:string;text:string}){return <Card className="grid min-h-48 place-items-center p-8 text-center" role="status"><div><strong className="text-sm">{title}</strong><p className="mt-1 text-xs text-mute">{text}</p></div></Card>};function Alert({text,retry}:{text:string;retry:()=>void}){return <div role="alert" className="flex items-center justify-between rounded-lg bg-terra/10 p-3 text-xs text-terra"><span>{text}</span><Btn variant="ghost" onClick={retry}><RefreshCw className="size-3"/>Coba lagi</Btn></div>};function Metric({label,value}:{label:string;value:string}){return <div><p className="text-mute">{label}</p><strong>{value}</strong></div>};function chip(active:boolean){return`rounded-lg px-3 py-2 text-xs font-medium ${active?"bg-olive-soft text-olive-deep":"text-mute hover:bg-black/5"}`};function money(value:string|number|null|undefined,currency="IDR"){return new Intl.NumberFormat("id-ID",{style:"currency",currency,maximumFractionDigits:2}).format(Number(value)||0)}function date(value:string){return new Date(value).toLocaleString("id-ID")}function methodLabel(value:PaymentMethod){return value==="cash"?"Tunai":value==="qris_manual"?"QRIS manual":"Kartu manual"}function message(error:unknown){const raw=error instanceof Error?error.message:"Operasi POS gagal.";const code=Object.keys(businessMessages).find(x=>raw.includes(x));const mapped=code?`${businessMessages[code]} (${code})`:raw;return error instanceof ApiError&&error.status===409?`Konflik: ${mapped}`:mapped}
