@@ -502,9 +502,9 @@ export function MenuProductsView() {
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Kpi icon={<UtensilsCrossed />} label="Total Menu" value={summary.menus} />
         <Kpi icon={<Layers3 />} label="Kategori" value={summary.categories} />
-        <Kpi icon={<Layers3 />} label="Variant" value={summary.variants} />
+          <Kpi icon={<Layers3 />} label="Varian" value={summary.variants} />
         <Kpi icon={<UtensilsCrossed />} label="Aktif" value={summary.active} />
-        <Kpi icon={<Archive />} label="Archived" value={summary.archived} />
+          <Kpi icon={<Archive />} label="Diarsipkan" value={summary.archived} />
       </div>
       {refreshing && (
         <p className="mb-2 text-xs text-mute" role="status">
@@ -620,7 +620,7 @@ export function MenuProductsView() {
         }
       >
         {detailLoading ? (
-          <State kind="loading" title="Memuat detail" text="Variant sedang diambil." />
+              <State kind="loading" title="Memuat detail" text="Varian sedang diambil." />
         ) : detailError ? (
           <State
             kind="error"
@@ -671,7 +671,7 @@ export function MenuProductsView() {
       <Modal
         open={Boolean(variantForm)}
         onClose={closeForms}
-        title={editingVariant ? "Ubah Variant" : "Tambah Variant"}
+        title={editingVariant ? "Ubah Varian" : "Tambah Varian"}
         wide
       >
         {variantForm && (

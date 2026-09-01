@@ -63,9 +63,9 @@ export function StatusBadge({ label }: { label: string }) {
     draft: "mute", Draft: "mute", closed: "mute", Ditutup: "mute", cancelled: "mute", Dibatalkan: "mute", inactive: "mute", normal: "neutral",
   };
   const labels: Record<string, string> = {
-    draft: "Draft", approved: "Disetujui", sent: "Dikirim", partially_received: "Diterima Sebagian", received: "Diterima", closed: "Ditutup", cancelled: "Dibatalkan",
-    posted: "Posted", void: "Void", submitted: "Diajukan", rejected: "Ditolak", active: "Aktif", archived: "Diarsipkan", suspended: "Ditangguhkan",
-    out: "Habis", critical: "Kritis", low: "Rendah", safe: "Aman", normal: "Normal", warning: "Perhatian", overdue: "Terlambat", rush: "Rush",
+    draft: "Draf", approved: "Disetujui", sent: "Dikirim", partially_received: "Diterima Sebagian", received: "Diterima", closed: "Ditutup", cancelled: "Dibatalkan",
+    posted: "Dibukukan", void: "Dibatalkan", submitted: "Diajukan", rejected: "Ditolak", active: "Aktif", archived: "Diarsipkan", suspended: "Ditangguhkan",
+    out: "Habis", critical: "Kritis", low: "Rendah", safe: "Aman", normal: "Normal", warning: "Perhatian", overdue: "Terlambat", rush: "Mendesak",
   };
   return <Badge tone={map[label] ?? "neutral"}>{labels[label] ?? label}</Badge>;
 }

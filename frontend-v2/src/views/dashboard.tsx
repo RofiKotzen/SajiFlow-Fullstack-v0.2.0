@@ -122,7 +122,7 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-balance">Dasbor Pembelian</h1>
           <p className="mt-1 text-[13px] text-mute">
-            Ringkasan backend ·{" "}
+            Ringkasan server ·{" "}
             {activeOutletId ? "outlet aktif" : "semua outlet yang dapat diakses"}
           </p>
         </div>
@@ -136,9 +136,9 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
       </div>
       {limited && (
         <Card className="mb-4 p-5 text-center">
-          <strong>Akses Dashboard terbatas</strong>
+          <strong>Akses dasbor terbatas</strong>
           <p className="text-xs text-mute">
-            Tidak ada permission read untuk sumber operasional Dashboard.
+            Tidak ada izin baca untuk sumber operasional dasbor.
           </p>
         </Card>
       )}
@@ -146,17 +146,17 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
         <Kpi
           label="Nilai PO Aktif"
           value={po.loading ? "…" : po.data ? money(poValue, currency) : "Belum tersedia"}
-          sub={po.data ? `${activePo.length} PO di luar closed/cancelled` : labelError(po)}
+          sub={po.data ? `${activePo.length} PO belum ditutup atau dibatalkan` : labelError(po)}
           tone="text-olive"
         />
         <Kpi
           label="PO Menunggu Penerimaan"
           value={po.loading ? "…" : po.data ? String(pendingGr) : "—"}
-          sub="Status sent / partially received"
+          sub="Status dikirim atau diterima sebagian"
           tone="text-terra"
         />
         <Kpi
-          label="Nilai Inventory"
+          label="Nilai Persediaan"
           value={
             inventory.loading
               ? "…"
@@ -174,7 +174,7 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
           tone="text-mute"
         />
         <Kpi
-          label="Supplier Aktif"
+          label="Pemasok Aktif"
           value={suppliers.loading ? "…" : suppliers.data ? String(activeSuppliers.length) : "—"}
           sub={suppliers.data ? `${noCatalog} tanpa katalog aktif` : labelError(suppliers)}
           tone="text-olive"
@@ -183,8 +183,8 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.9fr_1fr]">
         <Card className="overflow-hidden">
           <CardHeader
-            title="Purchase Order Terbaru"
-            sub={po.data ? `${po.data.length} dokumen dalam scope backend` : labelError(po)}
+            title="Pesanan Pembelian Terbaru"
+            sub={po.data ? `${po.data.length} dokumen dalam cakupan server` : labelError(po)}
             action={
               can("purchase_orders.read") ? (
                 <button
@@ -197,11 +197,11 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
             }
           />
           {po.loading ? (
-            <Panel text="Memuat Purchase Order…" />
+            <Panel text="Memuat pesanan pembelian…" />
           ) : po.error ? (
             <Panel text={labelError(po)} retry={() => setReload((x) => x + 1)} />
           ) : recent.length ? (
-            <DataTable head={["No. PO", "Supplier / Outlet", "Tanggal", "Nilai", "Status"]} wide>
+            <DataTable head={["No. PO", "Pemasok / Outlet", "Tanggal", "Nilai", "Status"]} wide>
               {recent.map((x) => (
                 <Row key={x.id} onClick={() => goTo("orders")}>
                   <Cell className="mono">{x.poNo}</Cell>
@@ -218,14 +218,14 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
               ))}
             </DataTable>
           ) : (
-            <Panel text="Belum ada Purchase Order." />
+            <Panel text="Belum ada pesanan pembelian." />
           )}
         </Card>
         <div className="space-y-4">
           <Card className="p-4">
             <div className="flex items-baseline justify-between">
               <h2 className="text-[14px] font-semibold">Anggaran Aktif</h2>
-              <span className="text-[12px] text-mute">Scope outlet</span>
+              <span className="text-[12px] text-mute">Cakupan outlet</span>
             </div>
             {budgets.loading ? (
               <p className="mt-3 text-xs text-mute">Memuat…</p>
@@ -238,13 +238,13 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
                       currency,
                     )}
                   </span>{" "}
-                  dari {activeBudgets.length} Budget aktif
+                  dari {activeBudgets.length} anggaran aktif
                 </p>
                 <div className="mt-2">
                   <Progress value={0} />
                 </div>
                 <p className="mt-1.5 text-[11px] text-mute">
-                  Utilization tidak tersedia pada endpoint list; tidak dihitung secara semu.
+                  Pemakaian tidak tersedia pada endpoint daftar; nilainya tidak diperkirakan.
                 </p>
               </>
             ) : (
@@ -254,7 +254,7 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
           <Card className="p-4">
             <h2 className="text-[14px] font-semibold">Item Perhatian</h2>
             {inventory.loading ? (
-              <p className="mt-3 text-xs text-mute">Memuat Inventory…</p>
+              <p className="mt-3 text-xs text-mute">Memuat persediaan…</p>
             ) : attention.length ? (
               <ul className="mt-3 space-y-2.5">
                 {attention.map((x) => (
@@ -282,7 +282,7 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
             <h2 className="text-[14px] font-semibold">Cakupan Master</h2>
             <ul className="mt-3 space-y-3">
               <Coverage
-                label="Supplier aktif"
+                label="Pemasok aktif"
                 value={suppliers.data ? `${activeSuppliers.length}` : labelError(suppliers)}
                 warn={noCatalog > 0}
               />
@@ -291,7 +291,7 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
                 value={menus.data ? `${menus.data.active}` : labelError(menus)}
               />
               <Coverage
-                label="Recipe draft / approved"
+                label="Resep draf / disetujui"
                 value={
                   recipes.data
                     ? `${recipes.data.filter((x) => x.status === "draft").length} / ${recipes.data.filter((x) => x.status === "approved").length}`
@@ -299,7 +299,7 @@ export function DashboardView({ goTo }: { goTo: (v: string) => void }) {
                 }
               />
               <Coverage
-                label="GR posted"
+                label="Penerimaan barang dibukukan"
                 value={
                   gr.data
                     ? `${gr.data.filter((x) => x.status === "posted").length}`

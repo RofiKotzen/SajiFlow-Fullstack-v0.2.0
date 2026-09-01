@@ -1,21 +1,793 @@
-import{Plus,RefreshCw,Search}from"lucide-react";import{useCallback,useEffect,useMemo,useState,type FormEvent}from"react";import{toast}from"sonner";import{Badge,Btn,Card,Cell,DataTable,Field,Modal,Row,SelectInput,StatusBadge,Tabs,TextArea,TextInput}from"@/components/ui";import{useAuth}from"@/contexts/auth-context";import{ApiError}from"@/lib/api/types";
-type Tab="tenant"|"outlet"|"user"|"role"|"permission"|"settings";type Tenant={id:string;code:string;name:string;timezone:string;currencyCode:string;status:string};type Outlet={id:string;code:string;name:string;address?:string;phone?:string;timezone:string;businessDayCutoff?:string;isActive:boolean};type Permission={id:string;code:string;module:string;description:string};type Role={id:string;code:string;name:string;description?:string;isSystem:boolean;permissions?:Permission[]};type Assignment={roleId:string;roleCode:string;roleName:string;outletId?:string};type User={id:string;fullName:string;email:string;employeeCode?:string;phone?:string;status:string;assignments?:Assignment[]};type Dialog="outlet"|"user"|"role"|"password"|"assign-role"|"assign-permission"|"status"|null;
-const tabs=[{id:"tenant",label:"Tenant"},{id:"outlet",label:"Outlet"},{id:"user",label:"User"},{id:"role",label:"Role"},{id:"permission",label:"Permission"},{id:"settings",label:"Settings"}];
-export function SettingsView(){const{api,session}=useAuth(),can=useCallback((p:string)=>(session?.user.permissions??[]).includes(p),[session]);const[tab,setTab]=useState<Tab>("tenant"),[tenant,setTenant]=useState<Tenant|null>(null),[outlets,setOutlets]=useState<Outlet[]>([]),[users,setUsers]=useState<User[]>([]),[roles,setRoles]=useState<Role[]>([]),[permissions,setPermissions]=useState<Permission[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(""),[query,setQuery]=useState(""),[dialog,setDialog]=useState<Dialog>(null),[selectedUser,setSelectedUser]=useState<User|null>(null),[selectedRole,setSelectedRole]=useState<Role|null>(null),[selectedOutlet,setSelectedOutlet]=useState<Outlet|null>(null),[saving,setSaving]=useState(false),[dialogError,setDialogError]=useState(""),[conflict,setConflict]=useState(false);
-const readPermission={tenant:"tenant.read",outlet:"outlets.read",user:"users.read",role:"roles.read",permission:"permissions.read",settings:""}[tab];const load=useCallback(async()=>{if(tab==="settings"){setLoading(false);return}if(!can(readPermission)){setLoading(false);return}setLoading(true);try{if(tab==="tenant")setTenant(await api<Tenant>("/tenant"));if(tab==="outlet")setOutlets(await api<Outlet[]>("/outlets"));if(tab==="user")setUsers(await api<User[]>("/users"));if(tab==="role")setRoles(await api<Role[]>("/roles"));if(tab==="permission")setPermissions(await api<Permission[]>("/permissions"));setError("")}catch(e){setError(msg(e))}finally{setLoading(false)}},[api,can,readPermission,tab]);useEffect(()=>{void load()},[load]);const visibleUsers=useMemo(()=>users.filter(x=>`${x.fullName} ${x.email} ${x.employeeCode??""}`.toLowerCase().includes(query.toLowerCase())),[query,users]);
-async function mutate(path:string,method:string,body:unknown,success:string){setSaving(true);setDialogError("");setConflict(false);try{await api(path,{method,body:JSON.stringify(body)});toast.success(success);setDialog(null);await load()}catch(e){setConflict(e instanceof ApiError&&e.status===409);setDialogError(msg(e))}finally{setSaving(false)}}async function roleDialog(user:User){setSelectedUser(await api<User>(`/users/${user.id}`));const[r,o]=await Promise.all([roles.length?Promise.resolve(roles):api<Role[]>("/roles"),outlets.length?Promise.resolve(outlets):api<Outlet[]>("/outlets")]);setRoles(r);setOutlets(o);setDialog("assign-role")}async function permissionDialog(role:Role){setSelectedRole(await api<Role>(`/roles/${role.id}`));if(!permissions.length)setPermissions(await api<Permission[]>("/permissions"));setDialog("assign-permission")}
-return <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="text-2xl font-semibold">Administration</h1><p className="text-[13px] text-mute">Tenant, outlet, user, role, dan permission backend</p></div><Tabs value={tab} onChange={x=>setTab(x as Tab)} tabs={tabs}/></div>{tab!=="settings"&&!can(readPermission)?<State title="Akses diperlukan" text={`Permission ${readPermission} diperlukan.`}/>:error?<Alert text={error} retry={()=>void load()}/>:loading?<State title="Memuat data" text="Mengambil Administration dari backend…"/>:<>
-{tab==="tenant"&&tenant&&<Card className="max-w-xl p-5"><form className="space-y-4" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void mutate("/tenant","PATCH",{name:f.get("name"),timezone:f.get("timezone"),currencyCode:String(f.get("currencyCode")).toUpperCase()},"Profil Tenant diperbarui.")}}><Field label="Kode Tenant"><TextInput value={tenant.code} disabled/></Field><Field label="Nama usaha" required><TextInput name="name" defaultValue={tenant.name} disabled={!can("tenant.update")} required/></Field><div className="grid grid-cols-2 gap-3"><Field label="Zona waktu" required><TextInput name="timezone" defaultValue={tenant.timezone} disabled={!can("tenant.update")} required/></Field><Field label="Mata uang" required><TextInput name="currencyCode" defaultValue={tenant.currencyCode} maxLength={3} disabled={!can("tenant.update")} required/></Field></div><StatusBadge label={tenant.status}/>{can("tenant.update")&&<Btn disabled={saving}>{saving?"Menyimpan…":"Simpan"}</Btn>}</form></Card>}
-{tab==="outlet"&&<Card className="overflow-hidden"><Header title="Daftar Outlet" count={outlets.length} action={can("outlets.create")?()=>setDialog("outlet"):undefined}/><DataTable head={["Kode","Nama","Alamat","Zona Waktu","Status",""]} wide>{outlets.map(x=><Row key={x.id}><Cell className="mono">{x.code}</Cell><Cell>{x.name}</Cell><Cell className="text-mute">{x.address??"—"}</Cell><Cell>{x.timezone}</Cell><Cell><StatusBadge label={x.isActive?"active":"inactive"}/></Cell><Cell>{can("outlets.update")&&<Btn variant="ghost" onClick={()=>{setSelectedOutlet(x);setDialog("status")}}>{x.isActive?"Nonaktifkan":"Aktifkan"}</Btn>}</Cell></Row>)}</DataTable></Card>}
-{tab==="user"&&<Card className="overflow-hidden"><Header title="User Management" count={visibleUsers.length} action={can("users.create")?()=>setDialog("user"):undefined} extra={<div className="relative"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute"/><TextInput className="w-48 pl-8" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Cari user…"/></div>}/><DataTable head={["Nama","Email","Kode","Role / Outlet","Status","Tindakan"]} wide>{visibleUsers.map(x=><Row key={x.id}><Cell><strong>{x.fullName}</strong></Cell><Cell>{x.email}</Cell><Cell>{x.employeeCode??"—"}</Cell><Cell>{x.assignments?.map(a=>`${a.roleName}${a.outletId?" (outlet)":" (semua)"}`).join(", ")||"Belum ada"}</Cell><Cell><StatusBadge label={x.status}/></Cell><Cell><div className="flex flex-wrap gap-1">{can("users.assign_roles")&&<Btn variant="ghost" onClick={()=>void roleDialog(x)}>Atur Role</Btn>}{can("users.reset_password")&&<Btn variant="ghost" onClick={()=>{setSelectedUser(x);setDialog("password")}}>Reset Password</Btn>}{can("users.update")&&<Btn variant="ghost" onClick={()=>void mutate(`/users/${x.id}`,"PATCH",{status:x.status==="active"?"suspended":"active"},"Status user diperbarui.")}>{x.status==="active"?"Suspend":"Aktifkan"}</Btn>}</div></Cell></Row>)}</DataTable></Card>}
-{tab==="role"&&<Card className="overflow-hidden"><Header title="Role Management" count={roles.length} action={can("roles.create")?()=>setDialog("role"):undefined}/><DataTable head={["Kode","Nama","Deskripsi","Permission","Tipe",""]} wide>{roles.map(x=><Row key={x.id}><Cell className="mono">{x.code}</Cell><Cell>{x.name}</Cell><Cell>{x.description??"—"}</Cell><Cell>{x.permissions?.length??0}</Cell><Cell><Badge tone={x.isSystem?"amber":"mute"}>{x.isSystem?"System":"Kustom"}</Badge></Cell><Cell>{can("roles.assign_permissions")&&<Btn variant="ghost" disabled={x.isSystem} onClick={()=>void permissionDialog(x)}>Atur Permission</Btn>}</Cell></Row>)}</DataTable></Card>}
-{tab==="permission"&&<PermissionPanel values={permissions}/>} {tab==="settings"&&<Card className="p-6"><h2 className="font-semibold">Settings tambahan belum tersedia</h2><p className="mt-2 text-sm text-mute">Backend tidak menyediakan endpoint settings umum. Tidak ada data lokal atau nilai palsu yang disimpan.</p></Card>}</>}
-<Modal open={dialog==="outlet"} onClose={()=>setDialog(null)} title="Tambah Outlet"><Simple error={dialogError} conflict={conflict} saving={saving} submit={f=>mutate("/outlets","POST",{code:String(f.get("code")).toUpperCase(),name:f.get("name"),address:f.get("address")||undefined,phone:f.get("phone")||undefined,timezone:f.get("timezone")},"Outlet dibuat.")}><Field label="Kode" required><TextInput name="code" required pattern="[A-Z0-9_-]+"/></Field><Field label="Nama" required><TextInput name="name" required/></Field><Field label="Alamat"><TextArea name="address"/></Field><Field label="Telepon"><TextInput name="phone"/></Field><Field label="Zona waktu"><TextInput name="timezone" defaultValue="Asia/Jakarta"/></Field></Simple></Modal>
-<Modal open={dialog==="user"} onClose={()=>setDialog(null)} title="Tambah User"><Simple error={dialogError} conflict={conflict} saving={saving} submit={f=>mutate("/users","POST",{fullName:f.get("fullName"),email:f.get("email"),employeeCode:f.get("employeeCode")||undefined,phone:f.get("phone")||undefined,password:f.get("password")},"User dibuat.")}><Field label="Nama" required><TextInput name="fullName" required/></Field><Field label="Email" required><TextInput type="email" name="email" required/></Field><Field label="Kode karyawan"><TextInput name="employeeCode"/></Field><Field label="Telepon"><TextInput name="phone"/></Field><Field label="Password awal" required hint="12–128 karakter; huruf besar, kecil, angka, dan simbol"><TextInput type="password" autoComplete="new-password" name="password" minLength={12} maxLength={128} required/></Field></Simple></Modal>
-<Modal open={dialog==="role"} onClose={()=>setDialog(null)} title="Tambah Role"><Simple error={dialogError} conflict={conflict} saving={saving} submit={f=>mutate("/roles","POST",{code:String(f.get("code")).toUpperCase(),name:f.get("name"),description:f.get("description")||undefined},"Role dibuat.")}><Field label="Kode" required><TextInput name="code" pattern="[A-Z0-9_-]+" required/></Field><Field label="Nama" required><TextInput name="name" required/></Field><Field label="Deskripsi"><TextArea name="description"/></Field></Simple></Modal>
-<Modal open={dialog==="password"} onClose={()=>setDialog(null)} title={`Reset Password · ${selectedUser?.fullName??""}`}><Simple error={dialogError} conflict={conflict} saving={saving} submit={f=>{const a=String(f.get("password")),b=String(f.get("confirm"));if(a!==b){setDialogError("Konfirmasi password tidak sama.");return Promise.resolve()}return mutate(`/users/${selectedUser?.id}/password`,"PUT",{newPassword:a,reason:f.get("reason")||undefined},"Password diperbarui dan refresh token lama dicabut.")}}><Field label="Password baru" required><TextInput type="password" autoComplete="new-password" name="password" minLength={12} maxLength={128} required/></Field><Field label="Konfirmasi" required><TextInput type="password" autoComplete="new-password" name="confirm" minLength={12} maxLength={128} required/></Field><Field label="Alasan"><TextArea name="reason" minLength={3} maxLength={500}/></Field></Simple></Modal>
-<Modal open={dialog==="assign-role"} onClose={()=>setDialog(null)} title={`Assignment · ${selectedUser?.fullName??""}`}><Simple error={dialogError} conflict={conflict} saving={saving} submit={f=>mutate(`/users/${selectedUser?.id}/roles`,"PUT",{assignments:[{roleId:f.get("roleId"),...(f.get("outletId")?{outletId:f.get("outletId")}:{})}]},"Role user diperbarui; session aktif perlu /auth/me refresh.")}><Field label="Role" required><SelectInput name="roleId" required defaultValue={selectedUser?.assignments?.[0]?.roleId??""}>{roles.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</SelectInput></Field><Field label="Scope outlet"><SelectInput name="outletId" defaultValue={selectedUser?.assignments?.[0]?.outletId??""}><option value="">Semua outlet</option>{outlets.filter(x=>x.isActive).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</SelectInput></Field></Simple></Modal>
-<Modal open={dialog==="assign-permission"} onClose={()=>setDialog(null)} title={`Permission · ${selectedRole?.name??""}`}><Simple error={dialogError} conflict={conflict} saving={saving} submit={f=>mutate(`/roles/${selectedRole?.id}/permissions`,"PUT",{permissionIds:f.getAll("permissionIds")},"Permission Role diperbarui; session user terkait perlu /auth/me refresh.")}><div className="max-h-80 space-y-1 overflow-y-auto">{permissions.map(x=><label key={x.id} className="flex gap-2 rounded p-2 text-xs hover:bg-black/5"><input type="checkbox" name="permissionIds" value={x.id} defaultChecked={selectedRole?.permissions?.some(p=>p.id===x.id)}/><span><code>{x.code}</code><small className="block text-mute">{x.description}</small></span></label>)}</div></Simple></Modal>
-<Modal open={dialog==="status"} onClose={()=>setDialog(null)} title={`${selectedOutlet?.isActive?"Nonaktifkan":"Aktifkan"} Outlet?`}><div className="space-y-4"><p className="text-sm">Perubahan dapat memengaruhi outlet aktif dan transaksi baru. Backend tetap memvalidasi seluruh referensi.</p><div className="flex justify-end gap-2"><Btn variant="ghost" onClick={()=>setDialog(null)}>Batal</Btn><Btn variant={selectedOutlet?.isActive?"danger":"primary"} disabled={saving} onClick={()=>void mutate(`/outlets/${selectedOutlet?.id}`,"PATCH",{isActive:!selectedOutlet?.isActive},"Status Outlet diperbarui.")}>Konfirmasi</Btn></div></div></Modal></div>}
-function Header({title,count,action,extra}:{title:string;count:number;action?:()=>void;extra?:React.ReactNode}){return <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4"><div><h2 className="font-semibold">{title}</h2><p className="text-xs text-mute">{count} data</p></div><div className="flex gap-2">{extra}{action&&<Btn onClick={action}><Plus className="size-3"/>Tambah</Btn>}</div></div>}function PermissionPanel({values}:{values:Permission[]}){const groups=Object.entries(values.reduce<Record<string,Permission[]>>((a,x)=>{(a[x.module]??=[]).push(x);return a},{}));return <div className="grid gap-3 md:grid-cols-2">{groups.map(([m,xs])=><Card className="p-4" key={m}><h2 className="mono font-semibold">{m}</h2>{xs.map(x=><div className="mt-2 rounded bg-cream p-2 text-xs" key={x.id}><code>{x.code}</code><p className="text-mute">{x.description}</p></div>)}</Card>)}</div>}
-function Simple({submit,children,error,conflict,saving}:{submit:(f:FormData)=>Promise<void>;children:React.ReactNode;error:string;conflict:boolean;saving:boolean}){return <form className="space-y-3" onSubmit={e=>{e.preventDefault();void submit(new FormData(e.currentTarget))}}>{error&&<div role="alert" className="rounded bg-terra/10 p-3 text-xs text-terra">{conflict&&"Konflik: "}{error}</div>}{children}<div className="flex justify-end"><Btn disabled={saving}>{saving?"Menyimpan…":"Simpan"}</Btn></div></form>}function Alert({text,retry}:{text:string;retry:()=>void}){return <div role="alert" className="flex justify-between rounded bg-terra/10 p-3 text-xs text-terra">{text}<Btn variant="ghost" onClick={retry}><RefreshCw className="size-3"/>Coba lagi</Btn></div>}function State({title,text}:{title:string;text:string}){return <Card className="grid min-h-48 place-items-center p-8 text-center"><div><strong>{title}</strong><p className="text-xs text-mute">{text}</p></div></Card>}function msg(e:unknown){return e instanceof Error?e.message:"Operasi Administration gagal."}
+import { Plus, RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { toast } from "sonner";
+import {
+  Badge,
+  Btn,
+  Card,
+  Cell,
+  DataTable,
+  Field,
+  Modal,
+  Row,
+  SelectInput,
+  StatusBadge,
+  Tabs,
+  TextArea,
+  TextInput,
+} from "@/components/ui";
+import { useAuth } from "@/contexts/auth-context";
+import { ApiError } from "@/lib/api/types";
+type Tab = "tenant" | "outlet" | "user" | "role" | "permission" | "settings";
+type Tenant = {
+  id: string;
+  code: string;
+  name: string;
+  timezone: string;
+  currencyCode: string;
+  status: string;
+};
+type Outlet = {
+  id: string;
+  code: string;
+  name: string;
+  address?: string;
+  phone?: string;
+  timezone: string;
+  businessDayCutoff?: string;
+  isActive: boolean;
+};
+type Permission = { id: string; code: string; module: string; description: string };
+type Role = {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  permissions?: Permission[];
+};
+type Assignment = { roleId: string; roleCode: string; roleName: string; outletId?: string };
+type User = {
+  id: string;
+  fullName: string;
+  email: string;
+  employeeCode?: string;
+  phone?: string;
+  status: string;
+  assignments?: Assignment[];
+};
+type Dialog =
+  "outlet" | "user" | "role" | "password" | "assign-role" | "assign-permission" | "status" | null;
+const tabs = [
+  { id: "tenant", label: "Tenant" },
+  { id: "outlet", label: "Outlet" },
+  { id: "user", label: "Pengguna" },
+  { id: "role", label: "Peran" },
+  { id: "permission", label: "Izin" },
+  { id: "settings", label: "Pengaturan" },
+];
+export function SettingsView() {
+  const { api, session } = useAuth(),
+    can = useCallback((p: string) => (session?.user.permissions ?? []).includes(p), [session]);
+  const [tab, setTab] = useState<Tab>("tenant"),
+    [tenant, setTenant] = useState<Tenant | null>(null),
+    [outlets, setOutlets] = useState<Outlet[]>([]),
+    [users, setUsers] = useState<User[]>([]),
+    [roles, setRoles] = useState<Role[]>([]),
+    [permissions, setPermissions] = useState<Permission[]>([]),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [query, setQuery] = useState(""),
+    [dialog, setDialog] = useState<Dialog>(null),
+    [selectedUser, setSelectedUser] = useState<User | null>(null),
+    [selectedRole, setSelectedRole] = useState<Role | null>(null),
+    [selectedOutlet, setSelectedOutlet] = useState<Outlet | null>(null),
+    [saving, setSaving] = useState(false),
+    [dialogError, setDialogError] = useState(""),
+    [conflict, setConflict] = useState(false);
+  const readPermission = {
+    tenant: "tenant.read",
+    outlet: "outlets.read",
+    user: "users.read",
+    role: "roles.read",
+    permission: "permissions.read",
+    settings: "",
+  }[tab];
+  const load = useCallback(async () => {
+    if (tab === "settings") {
+      setLoading(false);
+      return;
+    }
+    if (!can(readPermission)) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      if (tab === "tenant") setTenant(await api<Tenant>("/tenant"));
+      if (tab === "outlet") setOutlets(await api<Outlet[]>("/outlets"));
+      if (tab === "user") setUsers(await api<User[]>("/users"));
+      if (tab === "role") setRoles(await api<Role[]>("/roles"));
+      if (tab === "permission") setPermissions(await api<Permission[]>("/permissions"));
+      setError("");
+    } catch (e) {
+      setError(msg(e));
+    } finally {
+      setLoading(false);
+    }
+  }, [api, can, readPermission, tab]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  const visibleUsers = useMemo(
+    () =>
+      users.filter((x) =>
+        `${x.fullName} ${x.email} ${x.employeeCode ?? ""}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+      ),
+    [query, users],
+  );
+  async function mutate(path: string, method: string, body: unknown, success: string) {
+    setSaving(true);
+    setDialogError("");
+    setConflict(false);
+    try {
+      await api(path, { method, body: JSON.stringify(body) });
+      toast.success(success);
+      setDialog(null);
+      await load();
+    } catch (e) {
+      setConflict(e instanceof ApiError && e.status === 409);
+      setDialogError(msg(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function roleDialog(user: User) {
+    setSelectedUser(await api<User>(`/users/${user.id}`));
+    const [r, o] = await Promise.all([
+      roles.length ? Promise.resolve(roles) : api<Role[]>("/roles"),
+      outlets.length ? Promise.resolve(outlets) : api<Outlet[]>("/outlets"),
+    ]);
+    setRoles(r);
+    setOutlets(o);
+    setDialog("assign-role");
+  }
+  async function permissionDialog(role: Role) {
+    setSelectedRole(await api<Role>(`/roles/${role.id}`));
+    if (!permissions.length) setPermissions(await api<Permission[]>("/permissions"));
+    setDialog("assign-permission");
+  }
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Administrasi</h1>
+          <p className="text-[13px] text-mute">
+            Tenant, outlet, pengguna, peran, dan izin dari server
+          </p>
+        </div>
+        <Tabs value={tab} onChange={(x) => setTab(x as Tab)} tabs={tabs} />
+      </div>
+      {tab !== "settings" && !can(readPermission) ? (
+        <State title="Akses diperlukan" text={`Izin ${readPermission} diperlukan.`} />
+      ) : error ? (
+        <Alert text={error} retry={() => void load()} />
+      ) : loading ? (
+        <State title="Memuat data" text="Mengambil data administrasi dari server…" />
+      ) : (
+        <>
+          {tab === "tenant" && tenant && (
+            <Card className="max-w-xl p-5">
+              <form
+                className="space-y-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const f = new FormData(e.currentTarget);
+                  void mutate(
+                    "/tenant",
+                    "PATCH",
+                    {
+                      name: f.get("name"),
+                      timezone: f.get("timezone"),
+                      currencyCode: String(f.get("currencyCode")).toUpperCase(),
+                    },
+                    "Profil Tenant diperbarui.",
+                  );
+                }}
+              >
+                <Field label="Kode Tenant">
+                  <TextInput value={tenant.code} disabled />
+                </Field>
+                <Field label="Nama usaha" required>
+                  <TextInput
+                    name="name"
+                    defaultValue={tenant.name}
+                    disabled={!can("tenant.update")}
+                    required
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Zona waktu" required>
+                    <TextInput
+                      name="timezone"
+                      defaultValue={tenant.timezone}
+                      disabled={!can("tenant.update")}
+                      required
+                    />
+                  </Field>
+                  <Field label="Mata uang" required>
+                    <TextInput
+                      name="currencyCode"
+                      defaultValue={tenant.currencyCode}
+                      maxLength={3}
+                      disabled={!can("tenant.update")}
+                      required
+                    />
+                  </Field>
+                </div>
+                <StatusBadge label={tenant.status} />
+                {can("tenant.update") && (
+                  <Btn disabled={saving}>{saving ? "Menyimpan…" : "Simpan"}</Btn>
+                )}
+              </form>
+            </Card>
+          )}
+          {tab === "outlet" && (
+            <Card className="overflow-hidden">
+              <Header
+                title="Daftar Outlet"
+                count={outlets.length}
+                action={can("outlets.create") ? () => setDialog("outlet") : undefined}
+              />
+              <DataTable head={["Kode", "Nama", "Alamat", "Zona Waktu", "Status", ""]} wide>
+                {outlets.map((x) => (
+                  <Row key={x.id}>
+                    <Cell className="mono">{x.code}</Cell>
+                    <Cell>{x.name}</Cell>
+                    <Cell className="text-mute">{x.address ?? "—"}</Cell>
+                    <Cell>{x.timezone}</Cell>
+                    <Cell>
+                      <StatusBadge label={x.isActive ? "active" : "inactive"} />
+                    </Cell>
+                    <Cell>
+                      {can("outlets.update") && (
+                        <Btn
+                          variant="ghost"
+                          onClick={() => {
+                            setSelectedOutlet(x);
+                            setDialog("status");
+                          }}
+                        >
+                          {x.isActive ? "Nonaktifkan" : "Aktifkan"}
+                        </Btn>
+                      )}
+                    </Cell>
+                  </Row>
+                ))}
+              </DataTable>
+            </Card>
+          )}
+          {tab === "user" && (
+            <Card className="overflow-hidden">
+              <Header
+                title="Pengelolaan Pengguna"
+                count={visibleUsers.length}
+                action={can("users.create") ? () => setDialog("user") : undefined}
+                extra={
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute" />
+                    <TextInput
+                      className="w-48 pl-8"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Cari pengguna…"
+                    />
+                  </div>
+                }
+              />
+              <DataTable
+                head={["Nama", "Email", "Kode", "Peran / Outlet", "Status", "Tindakan"]}
+                wide
+              >
+                {visibleUsers.map((x) => (
+                  <Row key={x.id}>
+                    <Cell>
+                      <strong>{x.fullName}</strong>
+                    </Cell>
+                    <Cell>{x.email}</Cell>
+                    <Cell>{x.employeeCode ?? "—"}</Cell>
+                    <Cell>
+                      {x.assignments
+                        ?.map((a) => `${a.roleName}${a.outletId ? " (outlet)" : " (semua)"}`)
+                        .join(", ") || "Belum ada"}
+                    </Cell>
+                    <Cell>
+                      <StatusBadge label={x.status} />
+                    </Cell>
+                    <Cell>
+                      <div className="flex flex-wrap gap-1">
+                        {can("users.assign_roles") && (
+                          <Btn variant="ghost" onClick={() => void roleDialog(x)}>
+                            Atur Peran
+                          </Btn>
+                        )}
+                        {can("users.reset_password") && (
+                          <Btn
+                            variant="ghost"
+                            onClick={() => {
+                              setSelectedUser(x);
+                              setDialog("password");
+                            }}
+                          >
+                            Atur Ulang Kata Sandi
+                          </Btn>
+                        )}
+                        {can("users.update") && (
+                          <Btn
+                            variant="ghost"
+                            onClick={() =>
+                              void mutate(
+                                `/users/${x.id}`,
+                                "PATCH",
+                                { status: x.status === "active" ? "suspended" : "active" },
+                                "Status user diperbarui.",
+                              )
+                            }
+                          >
+                            {x.status === "active" ? "Tangguhkan" : "Aktifkan"}
+                          </Btn>
+                        )}
+                      </div>
+                    </Cell>
+                  </Row>
+                ))}
+              </DataTable>
+            </Card>
+          )}
+          {tab === "role" && (
+            <Card className="overflow-hidden">
+              <Header
+                title="Pengelolaan Peran"
+                count={roles.length}
+                action={can("roles.create") ? () => setDialog("role") : undefined}
+              />
+              <DataTable head={["Kode", "Nama", "Deskripsi", "Izin", "Tipe", ""]} wide>
+                {roles.map((x) => (
+                  <Row key={x.id}>
+                    <Cell className="mono">{x.code}</Cell>
+                    <Cell>{x.name}</Cell>
+                    <Cell>{x.description ?? "—"}</Cell>
+                    <Cell>{x.permissions?.length ?? 0}</Cell>
+                    <Cell>
+                      <Badge tone={x.isSystem ? "amber" : "mute"}>
+                        {x.isSystem ? "Sistem" : "Kustom"}
+                      </Badge>
+                    </Cell>
+                    <Cell>
+                      {can("roles.assign_permissions") && (
+                        <Btn
+                          variant="ghost"
+                          disabled={x.isSystem}
+                          onClick={() => void permissionDialog(x)}
+                        >
+                          Atur Izin
+                        </Btn>
+                      )}
+                    </Cell>
+                  </Row>
+                ))}
+              </DataTable>
+            </Card>
+          )}
+          {tab === "permission" && <PermissionPanel values={permissions} />}{" "}
+          {tab === "settings" && (
+            <Card className="p-6">
+              <h2 className="font-semibold">Pengaturan tambahan belum tersedia</h2>
+              <p className="mt-2 text-sm text-mute">
+                Server tidak menyediakan endpoint pengaturan umum. Tidak ada data lokal atau nilai
+                palsu yang disimpan.
+              </p>
+            </Card>
+          )}
+        </>
+      )}
+      <Modal open={dialog === "outlet"} onClose={() => setDialog(null)} title="Tambah Outlet">
+        <Simple
+          error={dialogError}
+          conflict={conflict}
+          saving={saving}
+          submit={(f) =>
+            mutate(
+              "/outlets",
+              "POST",
+              {
+                code: String(f.get("code")).toUpperCase(),
+                name: f.get("name"),
+                address: f.get("address") || undefined,
+                phone: f.get("phone") || undefined,
+                timezone: f.get("timezone"),
+              },
+              "Outlet dibuat.",
+            )
+          }
+        >
+          <Field label="Kode" required>
+            <TextInput name="code" required pattern="[A-Z0-9_-]+" />
+          </Field>
+          <Field label="Nama" required>
+            <TextInput name="name" required />
+          </Field>
+          <Field label="Alamat">
+            <TextArea name="address" />
+          </Field>
+          <Field label="Telepon">
+            <TextInput name="phone" />
+          </Field>
+          <Field label="Zona waktu">
+            <TextInput name="timezone" defaultValue="Asia/Jakarta" />
+          </Field>
+        </Simple>
+      </Modal>
+      <Modal open={dialog === "user"} onClose={() => setDialog(null)} title="Tambah Pengguna">
+        <Simple
+          error={dialogError}
+          conflict={conflict}
+          saving={saving}
+          submit={(f) =>
+            mutate(
+              "/users",
+              "POST",
+              {
+                fullName: f.get("fullName"),
+                email: f.get("email"),
+                employeeCode: f.get("employeeCode") || undefined,
+                phone: f.get("phone") || undefined,
+                password: f.get("password"),
+              },
+              "User dibuat.",
+            )
+          }
+        >
+          <Field label="Nama" required>
+            <TextInput name="fullName" required />
+          </Field>
+          <Field label="Email" required>
+            <TextInput type="email" name="email" required />
+          </Field>
+          <Field label="Kode karyawan">
+            <TextInput name="employeeCode" />
+          </Field>
+          <Field label="Telepon">
+            <TextInput name="phone" />
+          </Field>
+          <Field
+            label="Kata sandi awal"
+            required
+            hint="12–128 karakter; huruf besar, kecil, angka, dan simbol"
+          >
+            <TextInput
+              type="password"
+              autoComplete="new-password"
+              name="password"
+              minLength={12}
+              maxLength={128}
+              required
+            />
+          </Field>
+        </Simple>
+      </Modal>
+      <Modal open={dialog === "role"} onClose={() => setDialog(null)} title="Tambah Peran">
+        <Simple
+          error={dialogError}
+          conflict={conflict}
+          saving={saving}
+          submit={(f) =>
+            mutate(
+              "/roles",
+              "POST",
+              {
+                code: String(f.get("code")).toUpperCase(),
+                name: f.get("name"),
+                description: f.get("description") || undefined,
+              },
+              "Peran dibuat.",
+            )
+          }
+        >
+          <Field label="Kode" required>
+            <TextInput name="code" pattern="[A-Z0-9_-]+" required />
+          </Field>
+          <Field label="Nama" required>
+            <TextInput name="name" required />
+          </Field>
+          <Field label="Deskripsi">
+            <TextArea name="description" />
+          </Field>
+        </Simple>
+      </Modal>
+      <Modal
+        open={dialog === "password"}
+        onClose={() => setDialog(null)}
+        title={`Atur Ulang Kata Sandi · ${selectedUser?.fullName ?? ""}`}
+      >
+        <Simple
+          error={dialogError}
+          conflict={conflict}
+          saving={saving}
+          submit={(f) => {
+            const a = String(f.get("password")),
+              b = String(f.get("confirm"));
+            if (a !== b) {
+              setDialogError("Konfirmasi password tidak sama.");
+              return Promise.resolve();
+            }
+            return mutate(
+              `/users/${selectedUser?.id}/password`,
+              "PUT",
+              { newPassword: a, reason: f.get("reason") || undefined },
+              "Kata sandi diperbarui dan token penyegaran lama dicabut.",
+            );
+          }}
+        >
+          <Field label="Kata sandi baru" required>
+            <TextInput
+              type="password"
+              autoComplete="new-password"
+              name="password"
+              minLength={12}
+              maxLength={128}
+              required
+            />
+          </Field>
+          <Field label="Konfirmasi" required>
+            <TextInput
+              type="password"
+              autoComplete="new-password"
+              name="confirm"
+              minLength={12}
+              maxLength={128}
+              required
+            />
+          </Field>
+          <Field label="Alasan">
+            <TextArea name="reason" minLength={3} maxLength={500} />
+          </Field>
+        </Simple>
+      </Modal>
+      <Modal
+        open={dialog === "assign-role"}
+        onClose={() => setDialog(null)}
+        title={`Penetapan Peran · ${selectedUser?.fullName ?? ""}`}
+      >
+        <Simple
+          error={dialogError}
+          conflict={conflict}
+          saving={saving}
+          submit={(f) =>
+            mutate(
+              `/users/${selectedUser?.id}/roles`,
+              "PUT",
+              {
+                assignments: [
+                  {
+                    roleId: f.get("roleId"),
+                    ...(f.get("outletId") ? { outletId: f.get("outletId") } : {}),
+                  },
+                ],
+              },
+              "Peran pengguna diperbarui; sesi aktif perlu dimuat ulang melalui /auth/me.",
+            )
+          }
+        >
+          <Field label="Role" required>
+            <SelectInput
+              name="roleId"
+              required
+              defaultValue={selectedUser?.assignments?.[0]?.roleId ?? ""}
+            >
+              {roles.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                </option>
+              ))}
+            </SelectInput>
+          </Field>
+          <Field label="Cakupan outlet">
+            <SelectInput
+              name="outletId"
+              defaultValue={selectedUser?.assignments?.[0]?.outletId ?? ""}
+            >
+              <option value="">Semua outlet</option>
+              {outlets
+                .filter((x) => x.isActive)
+                .map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+            </SelectInput>
+          </Field>
+        </Simple>
+      </Modal>
+      <Modal
+        open={dialog === "assign-permission"}
+        onClose={() => setDialog(null)}
+        title={`Izin · ${selectedRole?.name ?? ""}`}
+      >
+        <Simple
+          error={dialogError}
+          conflict={conflict}
+          saving={saving}
+          submit={(f) =>
+            mutate(
+              `/roles/${selectedRole?.id}/permissions`,
+              "PUT",
+              { permissionIds: f.getAll("permissionIds") },
+              "Izin peran diperbarui; sesi pengguna terkait perlu dimuat ulang melalui /auth/me.",
+            )
+          }
+        >
+          <div className="max-h-80 space-y-1 overflow-y-auto">
+            {permissions.map((x) => (
+              <label key={x.id} className="flex gap-2 rounded p-2 text-xs hover:bg-black/5">
+                <input
+                  type="checkbox"
+                  name="permissionIds"
+                  value={x.id}
+                  defaultChecked={selectedRole?.permissions?.some((p) => p.id === x.id)}
+                />
+                <span>
+                  <code>{x.code}</code>
+                  <small className="block text-mute">{x.description}</small>
+                </span>
+              </label>
+            ))}
+          </div>
+        </Simple>
+      </Modal>
+      <Modal
+        open={dialog === "status"}
+        onClose={() => setDialog(null)}
+        title={`${selectedOutlet?.isActive ? "Nonaktifkan" : "Aktifkan"} Outlet?`}
+      >
+        <div className="space-y-4">
+          <p className="text-sm">
+            Perubahan dapat memengaruhi outlet aktif dan transaksi baru. Backend tetap memvalidasi
+            seluruh referensi.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Btn variant="ghost" onClick={() => setDialog(null)}>
+              Batal
+            </Btn>
+            <Btn
+              variant={selectedOutlet?.isActive ? "danger" : "primary"}
+              disabled={saving}
+              onClick={() =>
+                void mutate(
+                  `/outlets/${selectedOutlet?.id}`,
+                  "PATCH",
+                  { isActive: !selectedOutlet?.isActive },
+                  "Status Outlet diperbarui.",
+                )
+              }
+            >
+              Konfirmasi
+            </Btn>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+function Header({
+  title,
+  count,
+  action,
+  extra,
+}: {
+  title: string;
+  count: number;
+  action?: () => void;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b p-4">
+      <div>
+        <h2 className="font-semibold">{title}</h2>
+        <p className="text-xs text-mute">{count} data</p>
+      </div>
+      <div className="flex gap-2">
+        {extra}
+        {action && (
+          <Btn onClick={action}>
+            <Plus className="size-3" />
+            Tambah
+          </Btn>
+        )}
+      </div>
+    </div>
+  );
+}
+function PermissionPanel({ values }: { values: Permission[] }) {
+  const groups = Object.entries(
+    values.reduce<Record<string, Permission[]>>((a, x) => {
+      (a[x.module] ??= []).push(x);
+      return a;
+    }, {}),
+  );
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {groups.map(([m, xs]) => (
+        <Card className="p-4" key={m}>
+          <h2 className="mono font-semibold">{m}</h2>
+          {xs.map((x) => (
+            <div className="mt-2 rounded bg-cream p-2 text-xs" key={x.id}>
+              <code>{x.code}</code>
+              <p className="text-mute">{x.description}</p>
+            </div>
+          ))}
+        </Card>
+      ))}
+    </div>
+  );
+}
+function Simple({
+  submit,
+  children,
+  error,
+  conflict,
+  saving,
+}: {
+  submit: (f: FormData) => Promise<void>;
+  children: React.ReactNode;
+  error: string;
+  conflict: boolean;
+  saving: boolean;
+}) {
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit(new FormData(e.currentTarget));
+      }}
+    >
+      {error && (
+        <div role="alert" className="rounded bg-terra/10 p-3 text-xs text-terra">
+          {conflict && "Konflik: "}
+          {error}
+        </div>
+      )}
+      {children}
+      <div className="flex justify-end">
+        <Btn disabled={saving}>{saving ? "Menyimpan…" : "Simpan"}</Btn>
+      </div>
+    </form>
+  );
+}
+function Alert({ text, retry }: { text: string; retry: () => void }) {
+  return (
+    <div role="alert" className="flex justify-between rounded bg-terra/10 p-3 text-xs text-terra">
+      {text}
+      <Btn variant="ghost" onClick={retry}>
+        <RefreshCw className="size-3" />
+        Coba lagi
+      </Btn>
+    </div>
+  );
+}
+function State({ title, text }: { title: string; text: string }) {
+  return (
+    <Card className="grid min-h-48 place-items-center p-8 text-center">
+      <div>
+        <strong>{title}</strong>
+        <p className="text-xs text-mute">{text}</p>
+      </div>
+    </Card>
+  );
+}
+function msg(e: unknown) {
+  return e instanceof Error ? e.message : "Operasi administrasi gagal.";
+}

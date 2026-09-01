@@ -14,30 +14,30 @@ interface NavItem { id: ViewId; label: string; icon: ReactNode; perm?: string[] 
 interface NavGroup { label: string; items: NavItem[] }
 
 const NAV: NavGroup[] = [
-  { label: "Utama", items: [{ id: "dashboard", label: "Dashboard", icon: <LayoutDashboard className="size-4" /> }] },
+  { label: "Utama", items: [{ id: "dashboard", label: "Dasbor", icon: <LayoutDashboard className="size-4" /> }] },
   {
     label: "Operasional",
     items: [
       { id: "pos", label: "POS", icon: <ShoppingCart className="size-4" /> },
-      { id: "kds", label: "Kitchen Display", icon: <ChefHat className="size-4" /> },
+      { id: "kds", label: "Tampilan Dapur", icon: <ChefHat className="size-4" /> },
     ],
   },
   { label: "Persediaan", items: [{ id: "inventory", label: "Ringkasan Stok", icon: <Boxes className="size-4" />, perm: ["inventory.read"] }] },
   {
     label: "Pembelian",
     items: [
-      { id: "budgets", label: "Budget Planning", icon: <Wallet className="size-4" />, perm: ["budgets.read"] },
-      { id: "orders", label: "Purchase Order", icon: <ClipboardList className="size-4" />, perm: ["purchase_orders.read"] },
-      { id: "receipts", label: "Goods Receipt", icon: <ReceiptText className="size-4" />, perm: ["goods_receipts.read"] },
+      { id: "budgets", label: "Perencanaan Anggaran", icon: <Wallet className="size-4" />, perm: ["budgets.read"] },
+      { id: "orders", label: "Pesanan Pembelian", icon: <ClipboardList className="size-4" />, perm: ["purchase_orders.read"] },
+      { id: "receipts", label: "Penerimaan Barang", icon: <ReceiptText className="size-4" />, perm: ["goods_receipts.read"] },
     ],
   },
   {
-    label: "Master Data",
+    label: "Data Induk",
     items: [
       { id: "masters", label: "Bahan & Satuan", icon: <Package className="size-4" />, perm: ["ingredients.read", "units.read"] },
-      { id: "suppliers", label: "Supplier", icon: <Soup className="size-4" />, perm: ["suppliers.read"] },
+      { id: "suppliers", label: "Pemasok", icon: <Soup className="size-4" />, perm: ["suppliers.read"] },
       { id: "menu-products", label: "Menu & Produk", icon: <UtensilsCrossed className="size-4" />, perm: ["menus.read"] },
-      { id: "recipes", label: "Resep & Food Cost", icon: <BookOpen className="size-4" />, perm: ["recipes.read"] },
+      { id: "recipes", label: "Resep & Biaya Makanan", icon: <BookOpen className="size-4" />, perm: ["recipes.read"] },
     ],
   },
   {
@@ -74,7 +74,7 @@ export function AppShell({
   }, [nav, view, onViewChange]);
 
   const activeOutlet = outlets.find((outlet) => outlet.id === activeOutletId);
-  const roleLabel = user.roles.length ? user.roles.join(", ") : "Tanpa role aktif";
+  const roleLabel = user.roles.length ? user.roles.join(", ") : "Tanpa peran aktif";
   const initials = user.fullName.split(" ").filter(Boolean).map((word) => word[0]).slice(0, 2).join("").toUpperCase();
 
   const sidebar = (
@@ -86,7 +86,7 @@ export function AppShell({
         {!collapsed && (
           <div className="leading-tight">
             <p className="text-[15px] font-semibold tracking-tight text-cream">Saji Flow</p>
-            <p className="mono text-[11px] text-pine-mute">back-office</p>
+            <p className="mono text-[11px] text-pine-mute">operasional internal</p>
           </div>
         )}
       </div>
@@ -162,7 +162,7 @@ export function AppShell({
           <button
             className="hidden rounded-lg p-2 text-mute hover:bg-black/5 lg:block"
             onClick={() => setCollapsed((c) => !c)}
-            title={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
+            title={collapsed ? "Perluas bilah samping" : "Ciutkan bilah samping"}
           >
             {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
           </button>

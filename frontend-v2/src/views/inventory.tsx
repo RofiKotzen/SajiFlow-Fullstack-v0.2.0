@@ -299,7 +299,7 @@ export function InventoryView() {
     return (
       <InventoryState
         kind="forbidden"
-        title="Akses Inventory dibatasi"
+      title="Akses Persediaan dibatasi"
         message="Permission inventory.read diperlukan untuk melihat saldo dan ledger stok."
       />
     );
@@ -307,7 +307,7 @@ export function InventoryView() {
     return (
       <InventoryState
         kind="loading"
-        title="Memuat Inventory"
+      title="Memuat Persediaan"
         message="Saldo batch dan ledger sedang diambil dari backend."
       />
     );
@@ -315,7 +315,7 @@ export function InventoryView() {
     return (
       <InventoryState
         kind="error"
-        title="Inventory tidak dapat dimuat"
+      title="Persediaan tidak dapat dimuat"
         message={error}
         action="Coba lagi"
         onAction={() => setReloadKey((v) => v + 1)}
@@ -346,7 +346,7 @@ export function InventoryView() {
           )}
           <button
             className="rounded-lg p-2 text-mute ring-1 ring-black/10 hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-olive"
-            title="Muat ulang Inventory"
+              title="Muat ulang Persediaan"
             onClick={() => setReloadKey((v) => v + 1)}
           >
             <RefreshCw className="size-4" />
@@ -635,7 +635,7 @@ export function InventoryView() {
       <Drawer
         open={Boolean(selected)}
         onClose={() => setSelected(null)}
-        title={selected?.ingredientName ?? "Detail Inventory"}
+        title={selected?.ingredientName ?? "Detail Persediaan"}
         sub={selected ? `${selected.sku} · ${selected.outletName}` : undefined}
       >
         {detailLoading && (
@@ -731,9 +731,9 @@ function Toolbar(p: {
           </SelectInput>
         </Filter>
         {p.movementMode ? (
-          <Filter label="Tipe movement">
+        <Filter label="Jenis pergerakan">
             <SelectInput
-              aria-label="Filter tipe movement"
+            aria-label="Filter jenis pergerakan"
               value={p.movementType}
               onChange={(e) => p.onMovementType(e.target.value)}
               className="mt-1 min-w-40"
