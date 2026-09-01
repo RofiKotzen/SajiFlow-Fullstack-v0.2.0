@@ -1,140 +1,40 @@
-import { BellRing, Volume2, VolumeX } from "lucide-react";
-import { useState } from "react";
+import { AlertTriangle, BellRing, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge, Btn, Card, Drawer, StatusBadge } from "@/components/ui";
-import { KDS_TICKETS, KDS_STATIONS, type KdsTicket, type KdsStatus } from "@/lib/mock-data";
+import { useAuth } from "@/contexts/auth-context";
+import { ApiError } from "@/lib/api/types";
 
-const URGENCY_STYLE: Record<string, string> = {
-  normal: "text-mute", warning: "text-[oklch(0.52_0.11_70)]", overdue: "text-terra", rush: "text-terra",
-};
+type Status="queued"|"preparing"|"ready";
+type QueueItem={orderId:string;orderNo:string;businessDate:string;orderType:"dine_in"|"takeaway";tableNumber?:string|null;customerName?:string|null;orderNotes?:string|null;orderStatus:string;paymentStatus:string;orderCreatedAt:string;submittedAt?:string|null;orderLockVersion:number;itemId:string;lineNo:number;menuCode:string;menuName:string;variantCode:string;variantName:string;quantity:number;itemNotes?:string|null;itemStatus:Status;queuedAt?:string|null;preparingAt?:string|null;readyAt?:string|null;elapsedFrom?:string|null;itemLockVersion:number;requiresKitchen:boolean};
+type QueueResponse={serverTime:string;syncMode:"full_active_queue";outlet:{id:string;code:string;name:string};data:QueueItem[];pagination:{page:number;limit:number;total:number}};
+type DetailItem={id:string;lineNo:number;menuCode:string;menuName:string;variantCode:string;variantName:string;quantity:number;notes?:string|null;status:string;queuedAt?:string|null;preparingAt?:string|null;readyAt?:string|null;completedAt?:string|null;cancelledAt?:string|null;lockVersion:number;requiresKitchen:boolean};
+type History={id:string;salesOrderItemId:string;fromStatus?:string|null;toStatus:string;changedBy:string;reason?:string|null;changedAt:string};
+type Detail={serverTime:string;order:{id:string;outletId:string;orderNo:string;businessDate:string;orderType:string;tableNumber?:string|null;customerName?:string|null;notes?:string|null;status:string;paymentStatus:string;submittedAt?:string|null;createdAt:string;lockVersion:number};aggregateStatus:string;items:DetailItem[];history:History[]};
+const columns:{id:Status;label:string;tone:"neutral"|"amber"|"olive"}[]=[{id:"queued",label:"Baru",tone:"neutral"},{id:"preparing",label:"Diproses",tone:"amber"},{id:"ready",label:"Siap",tone:"olive"}];
+const errors:Record<string,string>={KDS_ITEM_NOT_FOUND:"Menu dapur tidak lagi tersedia.",KDS_ITEM_NOT_QUEUED:"Menu sudah tidak berada di antrean baru.",KDS_ITEM_NOT_PREPARING:"Menu belum atau sudah selesai diproses.",KDS_ITEM_NOT_ACTIVE:"Menu tidak aktif dalam alur kerja dapur.",STALE_KDS_ITEM_VERSION:"Menu berubah di perangkat lain.",ORDER_NO_LONGER_ACTIVE:"Pesanan sudah selesai atau dibatalkan.",OUTLET_ACCESS_DENIED:"Anda tidak memiliki akses ke outlet ini.",IDEMPOTENCY_CONFLICT:"Aksi ini memiliki data percobaan ulang yang berbeda."};
 
-export function KdsView() {
-  const [tickets, setTickets] = useState<KdsTicket[]>(KDS_TICKETS);
-  const [station, setStation] = useState("Semua");
-  const [sound, setSound] = useState(true);
-  const [selected, setSelected] = useState<KdsTicket | null>(null);
-
-  const visible = tickets.filter((t) => station === "Semua" || t.station === station);
-  const cols: { id: KdsStatus; label: string }[] = [
-    { id: "baru", label: "Baru" }, { id: "diproses", label: "Diproses" }, { id: "siap", label: "Siap" },
-  ];
-  const nextStatus = (s: KdsStatus): KdsStatus | null => (s === "baru" ? "diproses" : s === "diproses" ? "siap" : null);
-
-  const stationLoad = KDS_STATIONS.slice(1).map((s) => ({
-    name: s, count: tickets.filter((t) => t.station === s && t.status !== "siap").length,
-  }));
-
-  return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            Kitchen Display
-            <span className="flex items-center gap-1.5 rounded-full bg-olive-soft px-2 py-0.5 text-[11px] font-medium text-olive-deep">
-              <span className="size-1.5 animate-pulse rounded-full bg-olive" /> Live
-            </span>
-          </h1>
-          <p className="mt-1 text-[13px] text-mute">Shift pagi · 07:00–15:00 · 29 Agustus 2026</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1 rounded-lg bg-black/[0.04] p-1">
-            {KDS_STATIONS.map((s) => (
-              <button key={s} onClick={() => setStation(s)} className={`rounded-md px-2.5 py-1.5 text-[12px] font-medium ${station === s ? "bg-card ring-1 ring-black/10" : "text-mute"}`}>{s}</button>
-            ))}
-          </div>
-          <Btn variant="outline" className="px-2.5" onClick={() => setSound((s) => !s)} title="Suara notifikasi">
-            {sound ? <Volume2 className="size-4" /> : <VolumeX className="size-4" />}
-          </Btn>
-        </div>
-      </div>
-
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-        {stationLoad.map((s) => (
-          <Card key={s.name} className="flex items-center justify-between p-3.5">
-            <span className="text-[13px] font-medium">{s.name}</span>
-            <Badge tone={s.count >= 3 ? "terra" : s.count >= 2 ? "amber" : "olive"}>{s.count} tiket aktif</Badge>
-          </Card>
-        ))}
-      </div>
-      {tickets.some((t) => t.urgency === "overdue") && (
-        <div className="mb-4 flex items-center gap-2 rounded-xl bg-terra/10 px-4 py-2.5 text-[13px] font-medium text-terra ring-1 ring-terra/20">
-          <BellRing className="size-4" /> {tickets.filter((t) => t.urgency === "overdue").length} tiket melewati waktu tunggu — prioritaskan produksi.
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {cols.map((col) => (
-          <div key={col.id}>
-            <div className="mb-2 flex items-center justify-between px-1">
-              <h2 className="text-[13px] font-semibold uppercase tracking-wide text-mute">{col.label}</h2>
-              <span className="mono text-[12px] text-mute">{visible.filter((t) => t.status === col.id).length}</span>
-            </div>
-            <div className="space-y-3">
-              {visible.filter((t) => t.status === col.id).map((t) => (
-                <Card key={t.id} className={`p-3.5 ${t.priority ? "ring-terra/40" : ""}`}>
-                  <div className="flex items-center justify-between">
-                    <button onClick={() => setSelected(t)} className="mono text-[13px] font-semibold hover:text-olive-deep">{t.orderNo}</button>
-                    <span className={`mono text-[12px] font-medium ${URGENCY_STYLE[t.urgency]}`}>{t.elapsedMin} mnt</span>
-                  </div>
-                  <p className="mt-0.5 text-[11.5px] text-mute">{t.type}{t.table && ` · Meja ${t.table}`} · {t.station}{t.priority && <span className="ml-1 font-medium text-terra">· Prioritas</span>}</p>
-                  <ul className="mt-2 space-y-1 text-[12.5px]">
-                    {t.items.map((i, idx) => (
-                      <li key={idx} className="flex gap-2">
-                        <span className="mono shrink-0 font-semibold">{i.qty}×</span>
-                        <span>{i.name}{i.note && <span className="block text-[11px] italic text-mute">“{i.note}”</span>}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {nextStatus(t.status) && (
-                    <Btn
-                      className="mt-3 w-full py-1.5 text-[12px]"
-                      variant={t.status === "baru" ? "primary" : "outline"}
-                      onClick={() => {
-                        const next = nextStatus(t.status)!;
-                        setTickets((p) => p.map((x) => (x.id === t.id ? { ...x, status: next } : x)));
-                        toast.success(`${t.orderNo} → ${next}`);
-                      }}
-                    >
-                      {t.status === "baru" ? "Mulai Proses" : "Tandai Siap"}
-                    </Btn>
-                  )}
-                </Card>
-              ))}
-              {visible.filter((t) => t.status === col.id).length === 0 && (
-                <p className="rounded-xl border border-dashed border-black/10 px-3 py-6 text-center text-[12px] text-mute">Tidak ada tiket</p>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <Drawer open={!!selected} onClose={() => setSelected(null)} title={selected?.orderNo ?? ""} sub={selected ? `${selected.station} · ${selected.type}${selected.table ? ` · Meja ${selected.table}` : ""}` : undefined}>
-        {selected && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <StatusBadge label={selected.urgency} />
-              <span className={`mono text-[14px] font-semibold ${URGENCY_STYLE[selected.urgency]}`}>{selected.elapsedMin} menit</span>
-            </div>
-            <ul className="space-y-2">
-              {selected.items.map((i, idx) => (
-                <li key={idx} className="rounded-lg bg-cream px-3 py-2 text-[12.5px] ring-1 ring-black/5">
-                  <span className="font-medium">{i.qty}× {i.name}</span>
-                  {i.note && <p className="mt-0.5 text-[11.5px] italic text-mute">“{i.note}”</p>}
-                </li>
-              ))}
-            </ul>
-            {nextStatus(selected.status) && (
-              <Btn className="w-full" onClick={() => {
-                const next = nextStatus(selected.status)!;
-                setTickets((p) => p.map((x) => (x.id === selected.id ? { ...x, status: next } : x)));
-                setSelected({ ...selected, status: next });
-              }}>
-                {selected.status === "baru" ? "Mulai Proses" : "Tandai Siap"}
-              </Btn>
-            )}
-          </div>
-        )}
-      </Drawer>
-    </div>
-  );
+export function KdsView(){
+ const{api,session,activeOutletId}=useAuth(),can=useCallback((p:string)=>(session?.user.permissions??[]).includes(p),[session]),read=can("kds.read"),update=can("kds.update");
+ const[queue,setQueue]=useState<QueueItem[]>([]),[outletName,setOutletName]=useState(""),[loading,setLoading]=useState(true),[refreshing,setRefreshing]=useState(false),[error,setError]=useState(""),[stale,setStale]=useState(false),[serverOffset,setServerOffset]=useState(0),[clock,setClock]=useState(Date.now());
+ const[mobileStatus,setMobileStatus]=useState<Status>("queued"),[detailId,setDetailId]=useState(""),[detail,setDetail]=useState<Detail|null>(null),[detailLoading,setDetailLoading]=useState(false),[detailError,setDetailError]=useState(""),[mutating,setMutating]=useState("");
+ const controller=useRef<AbortController|null>(null),inFlight=useRef(false),queueRef=useRef<QueueItem[]>([]),keys=useRef(new Map<string,{hash:string;key:string}>());
+ const actionKey=(action:string,payload:unknown)=>{const hash=JSON.stringify(payload),old=keys.current.get(action);if(old?.hash===hash)return old.key;const key=crypto.randomUUID();keys.current.set(action,{hash,key});return key};
+ const loadQueue=useCallback(async(background=false)=>{if(!read||!activeOutletId||inFlight.current)return;inFlight.current=true;if(background)setRefreshing(true);else setLoading(true);const abort=new AbortController();controller.current=abort;try{const result=await api<QueueResponse>(`/kds/queue?outletId=${encodeURIComponent(activeOutletId)}&page=1&limit=100`,{signal:abort.signal});if(result.syncMode!=="full_active_queue")throw new Error("Mode sinkronisasi KDS tidak didukung.");queueRef.current=result.data;setQueue(result.data);setOutletName(result.outlet.name);setServerOffset(new Date(result.serverTime).getTime()-Date.now());setError("");setStale(false)}catch(e){if((e as Error).name!=="AbortError"){setError(message(e));setStale(queueRef.current.length>0)}}finally{inFlight.current=false;setLoading(false);setRefreshing(false)}},[activeOutletId,api,read]);
+ useEffect(()=>{controller.current?.abort();inFlight.current=false;queueRef.current=[];setQueue([]);setDetail(null);setDetailId("");setError("");keys.current.clear();void loadQueue(false);return()=>controller.current?.abort()},[activeOutletId,loadQueue]);
+ useEffect(()=>{if(!read||!activeOutletId)return;const poll=()=>{if(!document.hidden)void loadQueue(true)};const id=window.setInterval(poll,5000);const visible=()=>{if(!document.hidden)void loadQueue(true)};document.addEventListener("visibilitychange",visible);return()=>{window.clearInterval(id);document.removeEventListener("visibilitychange",visible)}},[activeOutletId,loadQueue,read]);
+ useEffect(()=>{const id=window.setInterval(()=>setClock(Date.now()),1000);return()=>window.clearInterval(id)},[]);
+ const openDetail=useCallback(async(orderId:string)=>{setDetailId(orderId);setDetail(null);setDetailError("");setDetailLoading(true);try{setDetail(await api<Detail>(`/kds/orders/${orderId}`))}catch(e){setDetailError(message(e))}finally{setDetailLoading(false)}},[api]);
+ async function transition(item:QueueItem|DetailItem,action:"start"|"ready",orderId:string){const itemId="itemId" in item?item.itemId:item.id,lockVersion="itemLockVersion" in item?item.itemLockVersion:item.lockVersion,payload={lockVersion},key=`${itemId}:${action}`;setDetailError("");setMutating(key);try{const next=await api<Detail>(`/kds/items/${itemId}/${action}`,{method:"POST",body:JSON.stringify({...payload,idempotencyKey:actionKey(key,payload)})});keys.current.delete(key);setDetail(next);toast.success(action==="start"?"Item mulai diproses.":"Item ditandai siap.");await loadQueue(true)}catch(e){const conflict=e instanceof ApiError&&e.status===409;setDetailError(message(e));if(conflict){toast.error(message(e));await loadQueue(true);if(detailId===orderId)await openDetail(orderId)}}finally{setMutating("")}}
+ const now=clock+serverOffset,overdue=queue.filter(x=>elapsedMinutes(x,now)>=15&&x.itemStatus!=="ready").length;
+ if(!read)return<State title="Akses KDS ditolak" text="Izin membaca KDS diperlukan."/>;if(!activeOutletId)return<State title="Outlet belum dipilih" text="Pilih outlet aktif dari menu utama aplikasi."/>;
+ return <div className="space-y-4"><header className="flex flex-wrap items-center justify-between gap-3"><div><h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">Tampilan Dapur <span className="flex items-center gap-1.5 rounded-full bg-olive-soft px-2 py-0.5 text-[11px] text-olive-deep"><span className={`size-1.5 rounded-full bg-olive ${refreshing?"animate-pulse":""}`}/>{refreshing?"Memperbarui":"Pembaruan otomatis aktif"}</span></h1><p className="mt-1 text-[13px] text-mute">{outletName||"Outlet aktif"} · pembaruan penuh sekitar 5 detik</p></div><Btn variant="outline" disabled={refreshing} onClick={()=>void loadQueue(true)}><RefreshCw className={`size-3.5 ${refreshing?"animate-spin":""}`}/>Perbarui</Btn></header>
+ {error&&(queue.length?<div role="status" className="flex items-center justify-between rounded-xl bg-amber/10 p-3 text-xs text-mute"><span><AlertTriangle className="mr-1 inline size-4"/>Data terakhir tetap ditampilkan; mungkin belum terbaru. {error}</span><Btn variant="ghost" onClick={()=>void loadQueue(true)}>Coba lagi</Btn></div>:<Alert text={error} retry={()=>void loadQueue(false)}/>)}
+ {overdue>0&&<div className="flex items-center gap-2 rounded-xl bg-terra/10 px-4 py-2.5 text-[13px] font-medium text-terra ring-1 ring-terra/20"><BellRing className="size-4"/>{overdue} item menunggu lebih dari 15 menit.</div>}
+ <div className="flex gap-1 rounded-lg bg-black/[0.04] p-1 lg:hidden">{columns.map(c=><button key={c.id} onClick={()=>setMobileStatus(c.id)} className={`flex-1 rounded-md px-3 py-2 text-xs ${mobileStatus===c.id?"bg-card ring-1 ring-black/10":"text-mute"}`}>{c.label} ({queue.filter(x=>x.itemStatus===c.id).length})</button>)}</div>
+ {loading&&!queue.length?<State title="Memuat antrean" text="Mengambil antrean aktif dari server…"/>:!queue.length&&!error?<State title="Dapur kosong" text="Belum ada menu dapur aktif pada outlet ini."/>:<div className="grid grid-cols-1 gap-4 lg:grid-cols-3">{columns.map(col=><section key={col.id} className={mobileStatus===col.id?"block":"hidden lg:block"}><div className="mb-2 flex items-center justify-between px-1"><h2 className="text-[13px] font-semibold uppercase tracking-wide text-mute">{col.label}</h2><Badge tone={col.tone}>{queue.filter(x=>x.itemStatus===col.id).length}</Badge></div><div className="space-y-3">{queue.filter(x=>x.itemStatus===col.id).map(item=><Ticket key={item.itemId} item={item} now={now} update={update} busy={mutating===`${item.itemId}:${item.itemStatus==="queued"?"start":"ready"}`} open={()=>void openDetail(item.orderId)} act={()=>void transition(item,item.itemStatus==="queued"?"start":"ready",item.orderId)}/>) }{!queue.some(x=>x.itemStatus===col.id)&&<p className="rounded-xl border border-dashed border-black/10 px-3 py-8 text-center text-xs text-mute">Tidak ada menu</p>}</div></section>)}</div>}
+ <Drawer open={Boolean(detailId)} onClose={()=>{setDetailId("");setDetail(null)}} title={detail?.order.orderNo??"Detail Pesanan"} sub={detail?`${orderTypeLabel(detail.order.orderType)}${detail.order.tableNumber?` · Meja ${detail.order.tableNumber}`:""} · ${statusLabel(detail.aggregateStatus)}`:undefined}>{detailLoading?<State title="Memuat detail" text="Mengambil rincian dan riwayat…"/>:detailError&&!detail?<Alert text={detailError} retry={()=>void openDetail(detailId)}/>:detail&&<div className="space-y-4">{detailError&&<Alert text={detailError} retry={()=>void openDetail(detail.order.id)}/>}<div className="flex flex-wrap gap-2"><StatusBadge label={statusLabel(detail.order.status)}/><Badge tone="mute">Versi pesanan {detail.order.lockVersion}</Badge>{stale&&<Badge tone="amber">Data mungkin lama</Badge>}</div>{detail.order.notes&&<div className="rounded-lg bg-cream p-3 text-xs"><strong>Catatan pesanan</strong><p className="mt-1 text-mute">{detail.order.notes}</p></div>}<ul className="space-y-2">{detail.items.map(item=><li key={item.id} className="rounded-lg bg-cream p-3 ring-1 ring-black/5"><div className="flex items-start justify-between gap-3"><div><strong className="text-sm">{item.quantity}× {item.menuName} · {item.variantName}</strong>{item.notes&&<p className="mt-1 text-xs italic text-mute">“{item.notes}”</p>}<p className="mt-1 text-[11px] text-mute">{statusLabel(item.status)} · versi {item.lockVersion}</p></div>{update&&item.status==="queued"&&<Btn disabled={Boolean(mutating)} onClick={()=>void transition(item,"start",detail.order.id)}>Mulai</Btn>}{update&&item.status==="preparing"&&<Btn disabled={Boolean(mutating)} onClick={()=>void transition(item,"ready",detail.order.id)}>Siap</Btn>}</div></li>)}</ul><div><h3 className="mb-2 text-xs font-semibold">Riwayat status</h3>{detail.history.map(h=><div key={h.id} className="border-t py-2 text-xs"><span>{h.fromStatus?statusLabel(h.fromStatus):"—"} → {statusLabel(h.toStatus)}</span><span className="float-right text-mute">{date(h.changedAt)}</span></div>)}</div><p className="rounded-lg bg-black/[0.03] p-3 text-xs text-mute">Pembatalan menu dilakukan melalui POS; KDS tahap pertama tidak menyediakan pembatalan menu satu per satu.</p></div>}</Drawer></div>
 }
+
+function Ticket({item,now,update,busy,open,act}:{item:QueueItem;now:number;update:boolean;busy:boolean;open:()=>void;act:()=>void}){const elapsed=elapsedMinutes(item,now),urgent=elapsed>=15&&item.itemStatus!=="ready";return <Card className={`p-3.5 ${urgent?"ring-terra/40":""}`}><div className="flex items-center justify-between"><button onClick={open} className="mono text-[13px] font-semibold hover:text-olive-deep focus-visible:outline-olive">{item.orderNo}</button><span className={`mono text-xs font-medium ${urgent?"text-terra":"text-mute"}`}>{item.itemStatus==="ready"?"Siap ":""}{elapsed} mnt</span></div><p className="mt-1 text-[11px] text-mute">{orderTypeLabel(item.orderType)}{item.tableNumber?` · Meja ${item.tableNumber}`:""}{item.customerName?` · ${item.customerName}`:""}</p><div className="mt-3"><p className="text-[13px] font-medium"><span className="mono mr-2 font-semibold">{item.quantity}×</span>{item.menuName} · {item.variantName}</p>{item.itemNotes&&<p className="mt-1 text-xs italic text-mute">“{item.itemNotes}”</p>}{item.orderNotes&&<p className="mt-2 rounded bg-black/[0.03] p-2 text-[11px] text-mute">Pesanan: {item.orderNotes}</p>}</div><div className="mt-2 flex gap-2 text-[11px] text-mute"><span>{statusLabel(item.orderStatus)}</span><span>· {statusLabel(item.paymentStatus)}</span><span>· versi {item.itemLockVersion}</span></div>{update&&item.itemStatus!=="ready"&&<Btn className="mt-3 min-h-10 w-full" variant={item.itemStatus==="queued"?"primary":"outline"} disabled={busy} onClick={act}>{busy?"Memproses…":item.itemStatus==="queued"?"Mulai Proses":"Tandai Siap"}</Btn>}</Card>}
+function elapsedMinutes(item:QueueItem,now:number){const value=item.itemStatus==="ready"?item.readyAt:item.itemStatus==="preparing"?item.preparingAt:item.queuedAt;const time=value?new Date(value).getTime():NaN;return Number.isFinite(time)?Math.max(0,Math.floor((now-time)/60000)):0}function State({title,text}:{title:string;text:string}){return <Card className="grid min-h-48 place-items-center p-8 text-center" role="status"><div><strong className="text-sm">{title}</strong><p className="mt-1 text-xs text-mute">{text}</p></div></Card>}function Alert({text,retry}:{text:string;retry:()=>void}){return <div role="alert" className="flex items-center justify-between rounded-xl bg-terra/10 p-3 text-xs text-terra"><span>{text}</span><Btn variant="ghost" onClick={retry}>Coba lagi</Btn></div>}function date(v:string){return new Date(v).toLocaleString("id-ID")}function orderTypeLabel(value:string){return value==="dine_in"?"Makan di tempat":value==="takeaway"?"Bawa pulang":statusLabel(value)}function statusLabel(value:string){const labels:Record<string,string>={draft:"Draf",submitted:"Dikirim",queued:"Baru",preparing:"Diproses",ready:"Siap",completed:"Selesai",cancelled:"Dibatalkan",unpaid:"Belum dibayar",partially_paid:"Dibayar sebagian",paid:"Lunas",refunded:"Dikembalikan"};return labels[value]??value.replaceAll("_"," ")}function message(error:unknown){const raw=error instanceof Error?error.message:"Operasi KDS gagal.";const code=Object.keys(errors).find(x=>raw.includes(x));const mapped=code?`${errors[code]} (${code})`:raw;return error instanceof ApiError&&error.status===409?`Konflik: ${mapped}`:mapped}
