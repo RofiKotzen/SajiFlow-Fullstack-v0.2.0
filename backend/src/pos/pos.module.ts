@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
+import { PosController } from "./pos.controller";
+import { PosService } from "./pos.service";
 
-// Workflow providers and controllers are deliberately deferred until Batch 4.
-@Module({})
+@Module({ controllers: [PosController], providers: [PosService] })
 export class PosModule {}

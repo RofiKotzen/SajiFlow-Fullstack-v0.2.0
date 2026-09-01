@@ -7,12 +7,18 @@ import {
   canTransitionOrder,
   canVoidPaidOrder,
   itemStatusOnSubmit,
+  formatMinor,
+  multiplyMoney,
+  parseDecimalToMinor,
   orderStatusAfterVoid,
   shouldConsumeRecipeItem,
 } from "./pos-domain";
 
 describe("POS Phase 1 domain rules", () => {
-  const unpaid = { paymentStatus: "unpaid" as const, allItemsReadyOrCompleted: false };
+  const unpaid = {
+    paymentStatus: "unpaid" as const,
+    allItemsReadyOrCompleted: false,
+  };
 
   it("allows only the approved order state machine", () => {
     expect(canTransitionOrder("draft", "submitted", unpaid)).toBe(true);
@@ -97,16 +103,12 @@ describe("POS Phase 1 domain rules", () => {
       changeAmount: "12000.00",
     });
     expect(() => calculatePayment("38000", "cash", "30000")).toThrow();
-    expect(
-      calculatePayment("38000", "qris_manual", "38000", "QR-01"),
-    ).toEqual({
+    expect(calculatePayment("38000", "qris_manual", "38000", "QR-01")).toEqual({
       amountApplied: "38000.00",
       amountTendered: "38000.00",
       changeAmount: "0.00",
     });
-    expect(() =>
-      calculatePayment("38000", "card_manual", "38000"),
-    ).toThrow();
+    expect(() => calculatePayment("38000", "card_manual", "38000")).toThrow();
     expect(() =>
       calculatePayment("38000", "qris_manual", "40000", "QR-01"),
     ).toThrow();
@@ -117,5 +119,18 @@ describe("POS Phase 1 domain rules", () => {
   it("skips optional Recipe items in Phase 1", () => {
     expect(shouldConsumeRecipeItem(false)).toBe(true);
     expect(shouldConsumeRecipeItem(true)).toBe(false);
+  });
+
+  it("calculates authoritative draft totals without floating point", () => {
+    expect(formatMinor(multiplyMoney("1000000000000.25", 3))).toBe(
+      "3000000000000.75",
+    );
+    const total =
+      multiplyMoney("12500.10", 2) +
+      multiplyMoney("7500.05", 3) +
+      multiplyMoney("0.99", 1);
+    expect(formatMinor(total)).toBe("47501.34");
+    expect(parseDecimalToMinor("0.00")).toBe(0n);
+    expect(() => parseDecimalToMinor("10.001")).toThrow();
   });
 });

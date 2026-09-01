@@ -21,11 +21,7 @@ export const ITEM_STATUSES = [
 ] as const;
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
 
-export const PAYMENT_METHODS = [
-  "cash",
-  "qris_manual",
-  "card_manual",
-] as const;
+export const PAYMENT_METHODS = ["cash", "qris_manual", "card_manual"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export type PaymentStatus = "unpaid" | "paid" | "voided";
 
@@ -58,9 +54,7 @@ export function canTransitionOrder(
   if (!orderTransitions[from].includes(to)) return false;
   if (to === "ready" && !context.allItemsReadyOrCompleted) return false;
   if (to === "completed")
-    return (
-      context.paymentStatus === "paid" && context.allItemsReadyOrCompleted
-    );
+    return context.paymentStatus === "paid" && context.allItemsReadyOrCompleted;
   return true;
 }
 
@@ -162,7 +156,26 @@ export function parseMoneyToMinor(value: string): bigint {
   return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
 }
 
-function formatMinor(value: bigint): string {
+export function parseDecimalToMinor(value: string | number): bigint {
+  const normalized = String(value);
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(normalized))
+    throw new Error(
+      "Nilai uang tidak valid atau memiliki lebih dari dua desimal.",
+    );
+  const [whole, fraction = ""] = normalized.split(".");
+  return BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+}
+
+export function multiplyMoney(
+  value: string | number,
+  quantity: number,
+): bigint {
+  if (!Number.isInteger(quantity) || quantity <= 0)
+    throw new Error("Quantity harus berupa integer positif.");
+  return parseDecimalToMinor(value) * BigInt(quantity);
+}
+
+export function formatMinor(value: bigint): string {
   const whole = value / 100n;
   const fraction = (value % 100n).toString().padStart(2, "0");
   return `${whole}.${fraction}`;

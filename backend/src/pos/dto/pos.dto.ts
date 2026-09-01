@@ -1,7 +1,8 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from "@nestjs/swagger";
+import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsEnum,
   IsInt,
@@ -55,8 +56,7 @@ export class PosOrderItemDto {
 export class CreatePosOrderDto {
   @ApiProperty() @IsUUID() outletId!: string;
   @ApiProperty({ enum: ORDER_TYPES }) @IsEnum(ORDER_TYPES) orderType!:
-    | "dine_in"
-    | "takeaway";
+    "dine_in" | "takeaway";
   @ApiPropertyOptional()
   @Validate(PosOrderTableConstraint)
   tableNumber?: string | null;
@@ -70,20 +70,44 @@ export class CreatePosOrderDto {
   @IsString()
   @Length(1, 1000)
   notes?: string | null;
-  @ApiPropertyOptional({ type: [PosOrderItemDto] })
-  @IsOptional()
+  @ApiProperty({ type: [PosOrderItemDto] })
   @IsArray()
+  @ArrayMinSize(1)
   @ArrayMaxSize(100)
   @ValidateNested({ each: true })
   @Type(() => PosOrderItemDto)
-  items?: PosOrderItemDto[];
+  items!: PosOrderItemDto[];
   @ApiProperty() @IsUUID("4") idempotencyKey!: string;
 }
 
-export class UpdatePosOrderDto extends PartialType(CreatePosOrderDto) {
+export class UpdatePosOrderDto {
   @ApiProperty() @IsInt() @Min(1) lockVersion!: number;
-  @IsOptional() @IsUUID("4") override idempotencyKey?: string;
-  @IsOptional() @IsUUID() override outletId?: string;
+  @ApiPropertyOptional({ enum: ORDER_TYPES })
+  @IsOptional()
+  @IsEnum(ORDER_TYPES)
+  orderType?: "dine_in" | "takeaway";
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(1, 30)
+  tableNumber?: string | null;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(1, 150)
+  customerName?: string | null;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(1, 1000)
+  notes?: string | null;
+  @ApiProperty({ type: [PosOrderItemDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ValidateNested({ each: true })
+  @Type(() => PosOrderItemDto)
+  items!: PosOrderItemDto[];
 }
 
 export class PosMutationDto {
